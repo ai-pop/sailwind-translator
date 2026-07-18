@@ -93,33 +93,29 @@ namespace SailwindTranslator
 
                     if (ru)
                     {
+                        // Запоминаем английский оригинал (только для чисто-английского текста),
+                        // чтобы восстановить при переключении на EN.
                         if (!_originals.ContainsKey(tm) && !ContainsCyrillic(cur))
                             _originals[tm] = cur;
 
-                        // Форматированные подписи (с табуляциями/escape) — не трогаем,
-                        // перевод ломает вёрстку (literal '/t/t/t' в настройках управления).
-                        if (cur.IndexOf('\t') >= 0 || cur.IndexOf("\\t", System.StringComparison.Ordinal) >= 0)
-                        {
-                            continue;
-                        }
+                        // Переводим через RichTextTranslator — он сам разбивает по разделителям
+                        // (\t, \n, ...) и переводит сегменты по отдельности, сохраняя вёрстку.
+                        // "Walk\tForward\tStop" -> "Идти\tВперёд\tСтоп".
+                        bool full, any;
+                        string result = RichTextTranslator.Translate(cur, out full, out any);
 
-                        if (ContainsCyrillic(cur)) continue;
-
-                        var ruText = Plugin.Manager?.Get(cur);
-                        if (!string.IsNullOrEmpty(ruText) && ruText != cur)
+                        if (any && result != cur)
                         {
-                            // Запоминаем оригинальный размер шрифта, чтобы потом подгонять.
                             if (!_origFontSize.ContainsKey(tm))
                                 _origFontSize[tm] = tm.fontSize;
-
-                            tm.text = ruText;
-                            FitFontSize(tm, cur, ruText);
+                            tm.text = result;
+                            string origForFit;
+                            _originals.TryGetValue(tm, out origForFit);
+                            FitFontSize(tm, origForFit ?? cur, result);
                             applied++;
                         }
-                        else
+                        if (!full)
                         {
-                            // Нет перевода — в очередь живому переводчику.
-                            LiveTranslator.Enqueue(cur);
                             queued++;
                         }
                     }
@@ -128,7 +124,6 @@ namespace SailwindTranslator
                         if (_originals.TryGetValue(tm, out var orig) && orig != cur)
                         {
                             tm.text = orig;
-                            // Возвращаем оригинальный размер шрифта.
                             if (_origFontSize.TryGetValue(tm, out var ofs))
                                 tm.fontSize = ofs;
                             restored++;

@@ -73,18 +73,14 @@ namespace SailwindTranslator
         }
 
         /// <summary>
-        /// Пропустить «технический» текст: короткие клавиши, числа, а ТАКЖЕ
-        /// подписи с escape-форматированием ('\t' табуляции для выравнивания колонок
-        /// в настройках) — перевод такого ломает формат, остаётся literal '/t/t/t'.
+        /// Пропустить «технический» сегмент: короткие клавиши, числа, коды клавиш,
+        /// строки без латиницы. Вызывается RichTextTranslator для каждого сегмента.
         /// </summary>
-        private static bool ShouldSkip(string s)
+        public static bool ShouldSkip(string s)
         {
             string t = s.Trim();
             if (t.Length == 0) return true;
             if (t.Length <= 2) return true; // одиночные символы/клавиши: W, A, S, D, F1...
-
-            // Форматированный текст с табуляциями/escape — НЕ переводим.
-            if (HasFormattingEscape(s)) return true;
 
             // Чистые числа/дроби/даты.
             bool allDigits = true;
@@ -103,22 +99,6 @@ namespace SailwindTranslator
             }
             if (!hasLetter) return true;
 
-            return false;
-        }
-
-        /// <summary>
-        /// Есть ли управляющие символы (кроме \n) или literal escape-последовательности.
-        /// Такие строки — форматированные подписи (выравнивание колонок); перевод ломает вёрстку.
-        /// </summary>
-        private static bool HasFormattingEscape(string s)
-        {
-            if (s == null) return false;
-            foreach (var c in s)
-            {
-                if (c < 0x20 && c != '\n') return true; // реальные управляющие, кроме переноса
-            }
-            if (s.IndexOf("\\t", StringComparison.Ordinal) >= 0) return true;  // literal \t
-            if (s.IndexOf("\\r", StringComparison.Ordinal) >= 0) return true;
             return false;
         }
 

@@ -35,31 +35,18 @@ namespace SailwindTranslator
             // Hot-reload переводов
             if (Time.frameCount % 60 == 0) Plugin.Manager?.CheckHotReload();
 
-            // Пустые/числовые не трогаем (коды клавиш, цены и т.п.)
             if (string.IsNullOrWhiteSpace(text)) return text;
-            if (ContainsCyrillic(text)) return text;
 
             // Кириллический шрифт
             if (Plugin.FontResolver != null && instance != null)
                 Plugin.FontResolver.ApplyTo(instance);
 
-            var ru = Plugin.Manager.Get(text);
-            if (ru != null)
-            {
-                return ru;
-            }
-
-            // Нет перевода в словаре — отдаём живому переводчику (переведёт онлайн в фоне,
-            // закеширует, и при следующем кадре сканер подставит результат).
-            LiveTranslator.Enqueue(text);
-            return text;
-        }
-
-        private static bool ContainsCyrillic(string s)
-        {
-            foreach (var c in s)
-                if ((c >= '\u0400' && c <= '\u04FF') || (c >= '\u0500' && c <= '\u052F')) return true;
-            return false;
+            // Переводим через RichTextTranslator — он разбивает по разделителям
+            // (\t \n ...) и переводит сегменты по отдельности, сохраняя вёрстку.
+            // Динамические строки вроде "pick up\nuse" переводятся как две фразы.
+            bool full, any;
+            string result = RichTextTranslator.Translate(text, out full, out any);
+            return any ? result : text;
         }
 
         [HarmonyPatch(typeof(TextMesh), nameof(TextMesh.text), MethodType.Setter)]
@@ -67,7 +54,7 @@ namespace SailwindTranslator
         public static void TextMesh_SetText_Prefix(ref string value, TextMesh __instance)
         {
             try { value = TryTranslate(value, __instance); }
-            catch (Exception ex) { Plugin.Log?.LogError($"TextMesh set_text prefix failed: {ex}"); }
+            catch (Exception ex) { Plugin.Log?.LogError("TextMesh set_text prefix failed: " + ex); }
         }
     }
 }
