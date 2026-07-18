@@ -15,7 +15,7 @@ namespace SailwindTranslator
     {
         public const string GUID = "ru.sailwind.translator";
         public const string NAME = "Sailwind Translator";
-        public const string VERSION = "1.3.1";
+        public const string VERSION = "1.3.2";
 
         internal static ManualLogSource Log;
         internal static Plugin Instance;
@@ -68,12 +68,13 @@ namespace SailwindTranslator
                 fm.Apply(CfgGameFont.Value);
             }
 
-            // Harmony-патч: перехват TextMesh.text setter.
+            // Harmony-патч: перехват TextMesh.text setter + жёсткая изоляция ввода.
             try
             {
                 _harmony = new Harmony(GUID);
                 _harmony.PatchAll(typeof(TextMeshPatcher));
-                Log.LogInfo("Harmony: патчи применены (TextMesh).");
+                InputIsolation.Patch(_harmony);
+                Log.LogInfo("Harmony: патчи применены (TextMesh + изоляция ввода).");
             }
             catch (System.Exception ex)
             {

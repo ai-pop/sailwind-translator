@@ -98,7 +98,28 @@ namespace SailwindTranslator
                 Font font = null;
                 if (entry.Source == "disk")
                 {
-                    font = new Font(entry.FilePath);
+                    // СНАЧАЛА пробуем ДИНАМИЧЕСКИЙ шрифт по имени семейства (из TTF).
+                    // new Font(path) даёт СТАТИЧЕСКИЙ шрифт (предпечённый атлас), и при
+                    // подмене у TextMesh текст пропадает (нет глифов в атласе). Динамический
+                    // же пекарит глифы по запросу, в любом размере, с кириллицей.
+                    string familyName = ReadFontFamilyName(entry.FilePath);
+                    if (!string.IsNullOrEmpty(familyName))
+                    {
+                        try { font = Font.CreateDynamicFontFromOSFont(familyName, 16); }
+                        catch { font = null; }
+                    }
+                    // Запасной путь — new Font(path). Может оказаться статическим, но
+                    // иногда работает (если шрифт совместим).
+                    if (font == null)
+                    {
+                        font = new Font(entry.FilePath);
+                    }
+                    // Проверка: если загруженный шрифт не рисует кириллицу — откат.
+                    if (font != null && !CanRenderCyrillic(font))
+                    {
+                        Plugin.Log?.LogWarning("[FONT-MGR] '" + entry.DisplayName + "' не рисует кириллицу — откат на системный Arial.");
+                        font = Font.CreateDynamicFontFromOSFont("Arial", 16);
+                    }
                 }
                 else
                 {
@@ -136,6 +157,63 @@ namespace SailwindTranslator
                 if (!Directory.Exists(dir)) return false;
                 var wt = Directory.GetLastWriteTimeUtc(dir);
                 return wt > _lastScan;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>Читает Family Name (nameID=1) из TTF/OTF таблицы 'name'.</summary>
+        private static string ReadFontFamilyName(string path)
+        {
+            try
+            {
+                byte[] data = File.ReadAllBytes(path);
+                if (data.Length < 12) return null;
+                int numTables = (data[4] << 8) | data[5];
+                int nameOffset = -1;
+                for (int i = 0; i < numTables; i++)
+                {
+                    int rec = 12 + i * 16;
+                    if (rec + 12 > data.Length) break;
+                    string tag = System.Text.Encoding.ASCII.GetString(data, rec, 4);
+                    if (tag == "name")
+                    {
+                        nameOffset = (data[rec + 8] << 24) | (data[rec + 9] << 16) | (data[rec + 10] << 8) | data[rec + 11];
+                        break;
+                    }
+                }
+                if (nameOffset < 0 || nameOffset + 6 > data.Length) return null;
+                int count = (data[nameOffset + 2] << 8) | data[nameOffset + 3];
+                int stringOffset = (data[nameOffset + 4] << 8) | data[nameOffset + 5];
+                for (int i = 0; i < count; i++)
+                {
+                    int rec = nameOffset + 6 + i * 12;
+                    if (rec + 12 > data.Length) break;
+                    int platformID = (data[rec] << 8) | data[rec + 1];
+                    int nameID = (data[rec + 6] << 8) | data[rec + 7];
+                    int length = (data[rec + 8] << 8) | data[rec + 9];
+                    int offset = (data[rec + 10] << 8) | data[rec + 11];
+                    if (nameID != 1) continue;
+                    int strPos = nameOffset + stringOffset + offset;
+                    if (strPos + length > data.Length) continue;
+                    if (platformID == 3)
+                        return System.Text.Encoding.BigEndianUnicode.GetString(data, strPos, length);
+                    return System.Text.Encoding.ASCII.GetString(data, strPos, length);
+                }
+                return null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Проверяет, умеет ли шрифт рендерить кириллицу.</summary>
+        private static bool CanRenderCyrillic(Font f)
+        {
+            if (f == null) return false;
+            try
+            {
+                f.RequestCharactersInTexture("Ая0", 32);
+                CharacterInfo info;
+                return f.GetCharacterInfo('А', out info, 32) &&
+                       f.GetCharacterInfo('я', out info, 32);
             }
             catch { return false; }
         }
