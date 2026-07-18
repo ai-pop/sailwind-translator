@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -9,28 +10,33 @@ namespace SailwindTranslator
     /// Активный переводчик сцены — переводит ВЕСЬ видимый текст в реальном времени.
     ///
     /// - Периодически (и на каждой загрузке сцены) перебирает все TextMesh.
-    /// - Для каждой строки: если перевод уже есть в словаре (ручной или ранее
-    ///   закешированный живым переводчиком) — применяет его.
-    /// - Если перевода нет — отдаёт строку в LiveTranslator (он переведёт онлайн,
-    ///   положит в словарь и взведёт NeedsRescan — тогда перевод подставится
-    ///   следующим проходом).
-    /// - Когда LiveTranslator докладывает о новых переводах (NeedsRescan=true),
-    ///   запускает внеочередной проход — так текст обновляется «на лету».
-    /// - EN/RU (F2) восстанавливает английские оригиналы.
-    ///
-    /// Динамические строки (lookText при наведении) дополнительно ловятся
-    /// Harmony-патчем на TextMesh.text — он тоже ставит незнакомки в очередь.
+    /// - Текст переводится через RichTextTranslator (сохраняет разделители \t \n ...).
+    /// - FIT-TO-BOUNDS: если перевод шире оригинала, равномерно сжимаем
+    ///   transform.localScale, чтобы он влез в РЕАЛЬНЫЙ прямоугольник оригинала
+    ///   (Renderer.bounds — мировой bounding box, который движок уже посчитал).
+    ///   Только сжатие, никогда растяжение. Якорь TextMesh работает за нас:
+    ///   текст остаётся прижатым к своей точке привязки (кнопке).
+    /// - Замер newBounds делается ОТЛОЖЕННО (корутина ждёт пару кадров), потому
+    ///   что bounds пересчитывается лениво после смены текста.
+    /// - EN/RU (F2) восстанавливает английский оригинал + оригинальный scale.
     /// </summary>
     public class SceneTranslator : MonoBehaviour
     {
         public static SceneTranslator Instance;
 
+        // Английские оригиналы (для восстановления при EN).
         private static readonly Dictionary<TextMesh, string> _originals = new Dictionary<TextMesh, string>();
-        private static readonly Dictionary<TextMesh, int> _origFontSize = new Dictionary<TextMesh, int>();
+        // Оригинальный localScale (до нашего сжатия) — восстанавливаем при EN.
+        private static readonly Dictionary<TextMesh, Vector3> _origScale = new Dictionary<TextMesh, Vector3>();
+        // Оригинальная ширина bounds (world units) — целевая для фит-ту-баундс.
+        private static readonly Dictionary<TextMesh, float> _origBoundsWidth = new Dictionary<TextMesh, float>();
+        // TextMesh, для которых перевод только что применён и нужен фит-чек.
+        private static readonly HashSet<TextMesh> _pendingFit = new HashSet<TextMesh>();
 
         private float _timer = 0f;
         private const float INTERVAL = 0.5f;
-        private const float FIT_MIN_SCALE = 0.6f;
+        private const float MIN_FIT = 0.5f;   // не сжимать сильнее, чем до 50%
+        private const float EPSILON = 0.0001f;
 
         private void Start()
         {
@@ -93,50 +99,135 @@ namespace SailwindTranslator
 
                     if (ru)
                     {
-                        // Запоминаем английский оригинал (только для чисто-английского текста),
-                        // чтобы восстановить при переключении на EN.
+                        // Запоминаем английский оригинал + оригинальный масштаб/ширину,
+                        // но ТОЛЬКО пока ещё не переводили (текст ещё английский).
                         if (!_originals.ContainsKey(tm) && !ContainsCyrillic(cur))
+                        {
                             _originals[tm] = cur;
+                            CaptureOriginalMetrics(tm);
+                        }
 
-                        // Переводим через RichTextTranslator — он сам разбивает по разделителям
-                        // (\t, \n, ...) и переводит сегменты по отдельности, сохраняя вёрстку.
-                        // "Walk\tForward\tStop" -> "Идти\tВперёд\tСтоп".
                         bool full, any;
                         string result = RichTextTranslator.Translate(cur, out full, out any);
 
                         if (any && result != cur)
                         {
-                            if (!_origFontSize.ContainsKey(tm))
-                                _origFontSize[tm] = tm.fontSize;
                             tm.text = result;
-                            string origForFit;
-                            _originals.TryGetValue(tm, out origForFit);
-                            FitFontSize(tm, origForFit ?? cur, result);
+                            // Планируем фит-ту-баундс на след. кадр (bounds пересчитается).
+                            _pendingFit.Add(tm);
                             applied++;
                         }
-                        if (!full)
-                        {
-                            queued++;
-                        }
+                        if (!full) queued++;
                     }
                     else
                     {
                         if (_originals.TryGetValue(tm, out var orig) && orig != cur)
                         {
                             tm.text = orig;
-                            if (_origFontSize.TryGetValue(tm, out var ofs))
-                                tm.fontSize = ofs;
+                            // Возвращаем оригинальный масштаб.
+                            if (_origScale.TryGetValue(tm, out var os))
+                                tm.transform.localScale = os;
                             restored++;
                         }
                     }
                 }
 
-                Plugin.Log?.LogInfo($"[SCAN] TextMesh={meshes.Length}, применено={applied}, в очередь={queued}, восстановлено={restored}");
+                // Запускаем фит для всех, кому он нужен (отложенный замер bounds).
+                if (_pendingFit.Count > 0)
+                    StartCoroutine(FitPendingNextFrame());
+
+                Plugin.Log?.LogInfo("[SCAN] TextMesh=" + meshes.Length + ", применено=" + applied + ", в очередь=" + queued + ", восстановлено=" + restored);
             }
             catch (Exception ex)
             {
-                Plugin.Log?.LogError($"[SCAN] ошибка: {ex.Message}");
+                Plugin.Log?.LogError("[SCAN] ошибка: " + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Снимаем оригинальные метрики TextMesh (до перевода): localScale и ширину
+        /// bounds в world units. Это «целевой прямоугольник» для последующего сжатия.
+        /// </summary>
+        private void CaptureOriginalMetrics(TextMesh tm)
+        {
+            try
+            {
+                _origScale[tm] = tm.transform.localScale;
+                var b = GetBounds(tm);
+                if (b.HasValue && b.Value.size.x > EPSILON)
+                    _origBoundsWidth[tm] = b.Value.size.x;
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Корутина: ждём пару кадров, чтобы MeshRenderer пересчитал bounds под новый
+        /// текст, затем фиттуем localScale так, чтобы ширина сравнялась с оригинальной.
+        /// </summary>
+        private IEnumerator FitPendingNextFrame()
+        {
+            // 2 кадра — с запасом на ленивый пересчёт TextMesh.
+            yield return null;
+            yield return null;
+
+            var done = new List<TextMesh>();
+            foreach (var tm in _pendingFit)
+            {
+                try
+                {
+                    if (tm == null) { done.Add(tm); continue; }
+                    FitToBounds(tm);
+                    done.Add(tm);
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Log?.LogError("[FIT] ошибка: " + ex.Message);
+                    done.Add(tm);
+                }
+            }
+            foreach (var d in done) _pendingFit.Remove(d);
+        }
+
+        /// <summary>
+        /// Fit-to-bounds: если ширина перевода больше оригинальной — равномерно
+        /// сжимаем localScale, чтобы новая ширина = оригинальной. Только сжатие,
+        /// никогда растяжение. Якорь TextMesh сохраняет позицию точки привязки.
+        /// </summary>
+        private void FitToBounds(TextMesh tm)
+        {
+            if (!_origBoundsWidth.TryGetValue(tm, out float origW)) return;
+            if (origW <= EPSILON) return;
+            if (!_origScale.TryGetValue(tm, out Vector3 origScale)) return;
+
+            var nb = GetBounds(tm);
+            if (!nb.HasValue) return;
+            float newW = nb.Value.size.x;
+            if (newW <= EPSILON) return;
+
+            // Сжимать нужно, только если перевод шире оригинала.
+            if (newW <= origW * 1.02f) return; // 2% допуск — не дёргаем мелкие расхождения
+
+            float fit = origW / newW;
+            if (fit < MIN_FIT) fit = MIN_FIT; // не мельче 50%
+
+            // Равномерный scale: форма букв сохраняется, позиция якоря — тоже.
+            tm.transform.localScale = origScale * fit;
+        }
+
+        /// <summary>
+        /// Безопасно получить Renderer.bounds у TextMesh (world-space bounding box).
+        /// </summary>
+        private static Bounds? GetBounds(TextMesh tm)
+        {
+            try
+            {
+                var r = tm.GetComponent<Renderer>();
+                if (r == null) return null;
+                Bounds b = r.bounds;
+                if (b.size.x <= 0 || b.size.y <= 0) return null;
+                return b;
+            }
+            catch { return null; }
         }
 
         private static bool ContainsCyrillic(string s)
@@ -145,41 +236,6 @@ namespace SailwindTranslator
             foreach (var c in s)
                 if ((c >= '\u0400' && c <= '\u04FF') || (c >= '\u0500' && c <= '\u052F')) return true;
             return false;
-        }
-
-        /// <summary>Видимая длина самой длинной строки (по строкам, без \n).</summary>
-        private static int VisibleLength(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return 0;
-            int max = 0;
-            foreach (var line in s.Split('\n'))
-            {
-                int len = line.Length;
-                if (len > max) max = len;
-            }
-            return max;
-        }
-
-        /// <summary>
-        /// Подгон размера шрифта под перевод. Английский компактнее русского,
-        /// поэтому перевод часто шире и вылезает за UI. Пропорционально уменьшаем
-        /// fontSize (но не ниже FIT_MIN_SCALE от оригинала).
-        /// </summary>
-        private static void FitFontSize(TextMesh tm, string original, string translated)
-        {
-            if (!_origFontSize.TryGetValue(tm, out int origSize)) return;
-            if (origSize <= 0) return;
-
-            int enLen = VisibleLength(original);
-            int ruLen = VisibleLength(translated);
-            if (enLen <= 0 || ruLen <= 0) { tm.fontSize = origSize; return; }
-
-            if (ruLen <= enLen) { tm.fontSize = origSize; return; }
-
-            float scale = (float)enLen / ruLen;
-            if (scale < FIT_MIN_SCALE) scale = FIT_MIN_SCALE;
-            int newSize = Mathf.Max(1, Mathf.RoundToInt(origSize * scale));
-            tm.fontSize = newSize;
         }
     }
 }
