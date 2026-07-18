@@ -59,6 +59,8 @@ namespace SailwindTranslator
             _timer += Time.deltaTime;
             if (_timer < INTERVAL) return;
             _timer = 0f;
+            // Пока наш UI открыт — текст статичен, переводить нечего, не спамим лог.
+            if (ModUI.IsVisible) return;
             ScanNow();
         }
 

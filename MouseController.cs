@@ -11,36 +11,39 @@ namespace SailwindTranslator
     ///   newState=true  → мышь захвачена (lockState=Locked, visible=false,
     ///                    GameState.inCursorMenu=false) — обычный геймплей.
     ///   newState=false → мышь свободна (visible=true, lockState=None,
-    ///                    GameState.inCursorMenu=true) — игра игнорирует клики
-    ///                    и raycast (MainButtonDown/AltButtonDown/DoRaycast все
-    ///                    проверяют !GameState.inCursorMenu).
+    ///                    GameState.inCursorMenu=true) — игра игнорирует клики.
     ///
-    /// Вызываем через reflection — MouseLook в Assembly-CSharp, не в наших refs.
+    /// ВАЖНО (v1.3.1): запоминаем, был ли курсор уже свободен ДО открытия UI
+    /// (например, игрок в главном меню/настройках). Тогда при закрытии НЕ возвращаем
+    /// мышь в игру — оставляем курсор видимым, как и было. Иначе после закрытия
+    /// нашего UI курсор исчезал бы в меню, где он нужен.
     /// </summary>
     public static class MouseController
     {
         private static MethodInfo _toggleMethod;
         private static bool _cached;
+        private static bool _wasInCursorMenu;  // состояние до открытия нашего UI
+        private static bool _releasedByUs;     // мы ли отпускали курсор
 
-        /// <summary>Отпустить курсор и отключить реакцию игрового UI (открыть наш UI).</summary>
+        /// <summary>Отпустить курсор и изолировать игровой UI (открыть наш UI).</summary>
         public static void ReleaseForUI()
         {
             try
             {
                 EnsureCached();
-                if (_toggleMethod != null)
+                _wasInCursorMenu = GetInCursorMenu();
+                if (_wasInCursorMenu)
                 {
-                    _toggleMethod.Invoke(null, new object[] { false });
-                    Plugin.Log?.LogInfo("[MOUSE] курсор освобождён, игровой UI изолирован.");
+                    // Уже в режиме курсора (меню/настройки) — ничего не делаем,
+                    // курсор уже свободен, игровой UI уже молчит.
+                    _releasedByUs = false;
+                    Plugin.Log?.LogInfo("[MOUSE] уже в cursor-menu — курсор не трогаем.");
+                    return;
                 }
-                else
-                {
-                    // Фоллбэк — напрямую через Cursor + GameState.
-                    Cursor.visible = true;
-                    Cursor.lockState = CursorLockMode.None;
-                    SetGameStateCursorMenu(true);
-                    Plugin.Log?.LogWarning("[MOUSE] фоллбэк: прямой Cursor + GameState.");
-                }
+                // Были в игре — отпускаем.
+                Toggle(false);
+                _releasedByUs = true;
+                Plugin.Log?.LogInfo("[MOUSE] курсор освобождён, игровой UI изолирован.");
             }
             catch (Exception ex)
             {
@@ -48,27 +51,74 @@ namespace SailwindTranslator
             }
         }
 
-        /// <summary>Вернуть мышь в игровой режим (закрыть наш UI).</summary>
+        /// <summary>Вернуть мышь в исходное состояние (закрыть наш UI).</summary>
         public static void ReturnToGame()
         {
             try
             {
-                EnsureCached();
-                if (_toggleMethod != null)
+                // Возвращаем только если МЫ отпускали. Если игрок был в меню —
+                // курсор остаётся свободным, как и было до нас.
+                if (!_releasedByUs)
                 {
-                    _toggleMethod.Invoke(null, new object[] { true });
+                    Plugin.Log?.LogInfo("[MOUSE] курсор не трогаем (были в cursor-menu).");
+                    return;
                 }
-                else
-                {
-                    Cursor.visible = false;
-                    Cursor.lockState = CursorLockMode.Locked;
-                    SetGameStateCursorMenu(false);
-                }
+                Toggle(true);
+                _releasedByUs = false;
+                Plugin.Log?.LogInfo("[MOUSE] мышь возвращена в игру.");
             }
             catch (Exception ex)
             {
                 Plugin.Log?.LogError("[MOUSE] ReturnToGame: " + ex.Message);
             }
+        }
+
+        private static void Toggle(bool toGame)
+        {
+            EnsureCached();
+            if (_toggleMethod != null)
+            {
+                _toggleMethod.Invoke(null, new object[] { toGame });
+                return;
+            }
+            // Фоллбэк.
+            if (toGame)
+            {
+                Cursor.visible = false;
+                Cursor.lockState = CursorLockMode.Locked;
+                SetGameStateCursorMenu(false);
+            }
+            else
+            {
+                Cursor.visible = true;
+                Cursor.lockState = CursorLockMode.None;
+                SetGameStateCursorMenu(true);
+            }
+        }
+
+        private static bool GetInCursorMenu()
+        {
+            try
+            {
+                Type gs = FindType("GameState");
+                if (gs == null) return false;
+                var f = gs.GetField("inCursorMenu", BindingFlags.Public | BindingFlags.Static);
+                if (f == null) return false;
+                return Convert.ToBoolean(f.GetValue(null));
+            }
+            catch { return false; }
+        }
+
+        private static void SetGameStateCursorMenu(bool value)
+        {
+            try
+            {
+                Type gs = FindType("GameState");
+                if (gs == null) return;
+                var f = gs.GetField("inCursorMenu", BindingFlags.Public | BindingFlags.Static);
+                f?.SetValue(null, value);
+            }
+            catch { }
         }
 
         private static void EnsureCached()
@@ -92,18 +142,6 @@ namespace SailwindTranslator
             {
                 Plugin.Log?.LogError("[MOUSE] EnsureCached: " + ex.Message);
             }
-        }
-
-        private static void SetGameStateCursorMenu(bool value)
-        {
-            try
-            {
-                Type gs = FindType("GameState");
-                if (gs == null) return;
-                var f = gs.GetField("inCursorMenu", BindingFlags.Public | BindingFlags.Static);
-                f?.SetValue(null, value);
-            }
-            catch { }
         }
 
         private static Type FindType(string fullName)
