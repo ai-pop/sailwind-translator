@@ -28,6 +28,13 @@ namespace SailwindTranslator
         private const float INTERVAL = 2f;
         private int _runs = 0;
         private const int MAX_RUNS = 20; // ~40 сек активного скана, дальше — только по sceneLoaded
+        private bool _contentDumped;
+
+        private static string Trunc(string s)
+        {
+            if (s == null) return "<null>";
+            return s.Length <= 80 ? s : s.Substring(0, 80) + "…";
+        }
 
         private void Start()
         {
@@ -44,6 +51,7 @@ namespace SailwindTranslator
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             // Сцена загрузилась — переведём чуть погодя (даём объектам инициализироваться).
+            _contentDumped = false; // в новой сцене — свежий дамп текста
             CancelInvoke(nameof(ScanNow));
             Invoke(nameof(ScanNow), 1f);
             Invoke(nameof(ScanNow), 3f);
@@ -75,6 +83,28 @@ namespace SailwindTranslator
                 bool ru = Plugin.CfgLanguage != null && Plugin.CfgLanguage.Value == "ru";
                 var meshes = FindObjectsOfType<TextMesh>();
                 int translated = 0, restored = 0;
+
+                // ОДНОРАЗОВЫЙ дамп реального текста в сцене — чтобы увидеть, какие строки
+                // там на самом деле (для наполнения словаря). Без этого мы гадаем.
+                if (!_contentDumped)
+                {
+                    _contentDumped = true;
+                    var seen = new HashSet<string>();
+                    int nonEmpty = 0;
+                    foreach (var tm in meshes)
+                    {
+                        if (tm == null) continue;
+                        string txt = tm.text;
+                        if (string.IsNullOrWhiteSpace(txt)) continue;
+                        nonEmpty++;
+                        if (seen.Add(txt))
+                            Plugin.Log?.LogInfo("[SCAN-TEXT] '" + Trunc(txt) + "'  (obj: " + (tm.gameObject != null ? tm.gameObject.name : "?") + ")");
+                        if (seen.Count >= 40) break;
+                    }
+                    Plugin.Log?.LogInfo(nonEmpty == 0
+                        ? "[SCAN-TEXT] Все " + meshes.Length + " TextMesh пусты — текст появляется при наведении на объекты (lookText). Наведись на штурвал/лебёдку/дверь и пришли новый лог."
+                        : "[SCAN-TEXT] непустых TextMesh: " + nonEmpty + " из " + meshes.Length + ". Пришли лог — добавлю строки в словарь.");
+                }
 
                 foreach (var tm in meshes)
                 {

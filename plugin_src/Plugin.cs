@@ -15,7 +15,7 @@ namespace SailwindTranslator
     {
         public const string GUID = "ru.sailwind.translator";
         public const string NAME = "Sailwind Translator";
-        public const string VERSION = "1.1.4";
+        public const string VERSION = "1.1.5";
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> CfgEnableTranslation;

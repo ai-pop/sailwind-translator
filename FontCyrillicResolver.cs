@@ -69,17 +69,16 @@ namespace SailwindTranslator
                     {
                         var font = new Font(path);
                         if (font == null) continue;
+                        // ВАЖНО: НЕ отвергаем шрифт по GetCharacterInfo! Для свежесозданного
+                        // динамического шрифта текстура глифов перестраивается асинхронно, и
+                        // GetCharacterInfo('А') в первом кадре ложно возвращает false даже для
+                        // полностью кириллического шрифта (например Arsenal). Шрифт в папке =
+                        // осознанный выбор пользователя — используем как есть. TextMesh сам
+                        // запросит нужные глифы при рендере.
                         try { font.RequestCharactersInTexture(CYRILLIC_SAMPLE, 32); } catch { }
-                        if (FontHasCyrillic(font))
-                        {
-                            _cyrFont = font;
-                            Plugin.Log?.LogInfo($"[FONT] '{name}' загружен как кириллический TextMesh-шрифт. 🎉");
-                            return;
-                        }
-                        else
-                        {
-                            Plugin.Log?.LogWarning($"[FONT] '{name}': кириллица в нём не обнаружена.");
-                        }
+                        _cyrFont = font;
+                        Plugin.Log?.LogInfo($"[FONT] '{name}' принят как шрифт перевода (детекцию кириллицы отключил — она давала ложные срабатывания). 🎉");
+                        return;
                     }
                     catch (Exception ex)
                     {
