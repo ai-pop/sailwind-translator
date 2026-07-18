@@ -46,18 +46,30 @@ namespace SailwindTranslator
 
         private void RefreshAllText()
         {
-            // TMP
+            // TextMesh — основной тип текста в Sailwind. Перечитываем, чтобы
+            // сеттер-патч отработал заново (для динамических строк).
+            var meshes = FindObjectsOfType<TextMesh>();
+            foreach (var t in meshes)
+            {
+                if (t == null) continue;
+                var cur = t.text;
+                t.text = "";
+                t.text = cur;
+            }
+
+            // Сканер сцены переведёт/восстановит зашитый текст (меню и т.п.).
+            SceneTranslator.OnLanguageChanged();
+
+            // TMP / UI.Text — на случай, если где-то есть (в игре их нет, но безопасно).
             var tmp = FindObjectsOfType<TMP_Text>();
             foreach (var t in tmp)
             {
                 if (t == null) continue;
                 var cur = t.text;
-                // Сначала пустая строка, потом обратно — форсирует set_text через наш патч
                 t.text = "";
                 t.text = cur;
             }
 
-            // UI.Text
             var ui = FindObjectsOfType<Text>();
             foreach (var t in ui)
             {
