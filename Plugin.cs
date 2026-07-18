@@ -15,7 +15,7 @@ namespace SailwindTranslator
     {
         public const string GUID = "ru.sailwind.translator";
         public const string NAME = "Sailwind Translator";
-        public const string VERSION = "1.1.1";
+        public const string VERSION = "1.1.2";
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> CfgEnableTranslation;
@@ -63,6 +63,8 @@ namespace SailwindTranslator
             gameObject.AddComponent<EditorMenu>();
             gameObject.AddComponent<LangToggle>();
             gameObject.AddComponent<FontAutoFit>();
+            gameObject.AddComponent<FontTicker>();          // ленивое создание/поиск шрифта
+            gameObject.AddComponent<SceneTextScanner>();    // диагностика типов текста
 
             Log.LogInfo($"{NAME} v{VERSION} loaded. F3=editor, F2=toggle EN/RU.");
         }
