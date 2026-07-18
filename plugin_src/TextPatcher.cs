@@ -14,21 +14,16 @@ namespace SailwindTranslator
     /// </summary>
     public static class TextPatcher
     {
-        // Запоминаем оригинал, чтобы при переключении на EN вернуть как было.
-        // Key: экземпляр компонента (WeakRef); Value: последний английский текст.
-        private static readonly Dictionary<int, string> _lastEnglish = new Dictionary<int, string>();
-        private static readonly WeakReference _dummy = new WeakReference(null);
-
         private static string TryTranslate(string text, object instance)
         {
             if (text == null) return null;
-            if (!Plugin.CfgEnableTranslation.Value) return text;
-            if (Plugin.CfgLanguage.Value != "ru") return text;
+            if (Plugin.CfgEnableTranslation == null || !Plugin.CfgEnableTranslation.Value) return text;
+            if (Plugin.CfgLanguage == null || Plugin.CfgLanguage.Value != "ru") return text;
 
             // Hot-reload каждые ~1 сек
             if (Time.frameCount % 60 == 0)
             {
-                Plugin.Manager.CheckHotReload();
+                Plugin.Manager?.CheckHotReload();
             }
 
             // Игнорируем чисто числовые/пустые

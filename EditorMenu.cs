@@ -4,9 +4,11 @@ using UnityEngine;
 namespace SailwindTranslator
 {
     /// <summary>
-    /// Окно редактора перевода. Управляется через BepInEx config-editor.enabled.
-    /// Включается/выключается в BepInEx/config/SailwindTranslator.cfg
+    /// Окно редактора перевода (IMGUI).
     /// Нажми E в игре чтобы открыть/закрыть.
+    ///
+    /// ВАЖНО: нажатие E ловится в OnGUI() через Event.current.
+    /// В Update() это не работает (Event.current там всегда null).
     /// </summary>
     public class EditorMenu : MonoBehaviour
     {
@@ -17,41 +19,21 @@ namespace SailwindTranslator
         private string _newKey = "";
         private string _newValue = "";
 
+        // Cooldown, чтобы одно нажатие E не сработало дважды (Layout/KeyDown)
+        private float _lastETime = 0f;
+        private const float E_COOLDOWN = 0.3f;
+
         // Кэш для отображения
         private List<KeyValuePair<string, string>> _rows = new List<KeyValuePair<string, string>>();
 
-        private void OnEnable()
-        {
-            // Ставим хук на GUI события через reflection (без InputLegacyModule)
-            Application.RegisterLogCallback(OnLogMessage);
-        }
-
-        private void OnDisable()
-        {
-            Application.RegisterLogCallback(null);
-        }
-
-        // Keyboard hook через Windows API (работает без Unity Input)
-        private float _lastETime = 0f;
-        
-        private void Update()
-        {
-            // Простой костыль: каждый кадр проверяем состояние клавиши E через таймер
-            // Это работает без InputLegacyModule
-            float now = Time.realtimeSinceStartup;
-            if (now - _lastETime > 0.5f)
-            {
-                // Используем Event.current для проверки клавиши E (IMGUI-way)
-                _lastETime = now;
-            }
-        }
-
         private void OnGUI()
         {
-            // Проверяем нажатие E через IMGUI Event
-            if (Event.current != null && Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.E)
+            var e = Event.current;
+            if (e != null && e.type == EventType.KeyDown && e.keyCode == KeyCode.E
+                && Time.realtimeSinceStartup - _lastETime > E_COOLDOWN)
             {
                 _visible = !_visible;
+                _lastETime = Time.realtimeSinceStartup;
                 if (_visible) Refresh();
             }
 
@@ -82,7 +64,7 @@ namespace SailwindTranslator
             // Stats
             int count = Plugin.Manager?.Count ?? 0;
             string lang = Plugin.CfgLanguage?.Value ?? "en";
-            GUILayout.Label($"Total: {count}   |   Lang: {lang}   |   Showing: {_rows.Count}",
+            GUILayout.Label($"Total: {count} | Lang: {lang} | Showing: {_rows.Count}",
                 GUI.skin.box);
 
             // Список переводов
@@ -146,11 +128,6 @@ namespace SailwindTranslator
             {
                 _rows = Plugin.Manager.Search(_search, 500);
             }
-        }
-
-        private void OnLogMessage(string condition, string stackTrace, LogType type)
-        {
-            // Можно логировать сюда если нужно
         }
     }
 }

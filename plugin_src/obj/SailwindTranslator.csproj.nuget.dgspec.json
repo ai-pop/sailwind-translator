@@ -1,20 +1,20 @@
 {
   "format": 1,
   "restore": {
-    "/home/z/my-project/download/sailwind-rus-bundle/plugin_src/SailwindTranslator.csproj": {}
+    "/home/user/sailwind-translator/plugin_src/SailwindTranslator.csproj": {}
   },
   "projects": {
-    "/home/z/my-project/download/sailwind-rus-bundle/plugin_src/SailwindTranslator.csproj": {
-      "version": "1.0.0",
+    "/home/user/sailwind-translator/plugin_src/SailwindTranslator.csproj": {
+      "version": "1.1.0",
       "restore": {
-        "projectUniqueName": "/home/z/my-project/download/sailwind-rus-bundle/plugin_src/SailwindTranslator.csproj",
+        "projectUniqueName": "/home/user/sailwind-translator/plugin_src/SailwindTranslator.csproj",
         "projectName": "SailwindTranslator",
-        "projectPath": "/home/z/my-project/download/sailwind-rus-bundle/plugin_src/SailwindTranslator.csproj",
-        "packagesPath": "/home/z/.nuget/packages/",
-        "outputPath": "/home/z/my-project/download/sailwind-rus-bundle/plugin_src/obj/",
+        "projectPath": "/home/user/sailwind-translator/plugin_src/SailwindTranslator.csproj",
+        "packagesPath": "/home/user/.nuget/packages/",
+        "outputPath": "/home/user/sailwind-translator/plugin_src/obj/",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "/home/z/.nuget/NuGet/NuGet.Config"
+          "/home/user/.nuget/NuGet/NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "netstandard2.0"
@@ -61,7 +61,7 @@
           ],
           "assetTargetFallback": true,
           "warn": true,
-          "runtimeIdentifierGraphPath": "/home/z/.dotnet/sdk/8.0.423/RuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "/home/user/.dotnet/sdk/8.0.423/RuntimeIdentifierGraph.json"
         }
       }
     }

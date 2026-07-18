@@ -9,7 +9,7 @@ namespace TMPro
 {
     public class TMP_FontAsset : UnityEngine.Object
     {
-        public string name;
+        public new string name;
         public List<TMP_FontAsset> fallbackFontAssetTable = new List<TMP_FontAsset>();
         public bool HasCharacter(char c) => true;
         public static TMP_FontAsset CreateFontAsset(Font font) => null;

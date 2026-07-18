@@ -8,29 +8,34 @@ namespace SailwindTranslator
     /// Переключатель языка на F2.
     /// Меняет значение CfgLanguage между "ru" и "en",
     /// затем перечитывает все тексты, чтобы UI обновился.
+    ///
+    /// ВАЖНО: проверка клавиши делается в OnGUI(), а НЕ в Update().
+    /// Event.current валиден ТОЛЬКО внутри OnGUI — в Update() он всегда null
+    /// (старая версия из-за этого вообще не реагировала на F2).
     /// </summary>
     public class LangToggle : MonoBehaviour
     {
         private float _lastToggle = 0f;
         private const float TOGGLE_COOLDOWN = 0.3f;
 
-        private void Update()
+        private void OnGUI()
         {
-            // Используем IMGUI Event вместо Input (работает без InputLegacyModule)
-            if (Event.current != null && Event.current.type == EventType.KeyDown)
-            {
-                if (Event.current.keyCode == KeyCode.F2 && Time.realtimeSinceStartup - _lastToggle > TOGGLE_COOLDOWN)
-                {
-                    ToggleLanguage();
-                    _lastToggle = Time.realtimeSinceStartup;
-                }
-            }
+            var e = Event.current;
+            if (e == null) return;
+            if (e.type != EventType.KeyDown) return;
+            if (e.keyCode != KeyCode.F2) return;
+
+            // Считаем нажатие «съеденным», чтобы GUI-контролы не дублировали
+            if (Time.realtimeSinceStartup - _lastToggle < TOGGLE_COOLDOWN) return;
+
+            ToggleLanguage();
+            _lastToggle = Time.realtimeSinceStartup;
         }
 
         private void ToggleLanguage()
         {
             if (Plugin.CfgLanguage == null) return;
-            
+
             var cur = Plugin.CfgLanguage.Value;
             var next = cur == "ru" ? "en" : "ru";
             Plugin.CfgLanguage.Value = next;
