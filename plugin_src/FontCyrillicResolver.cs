@@ -4,59 +4,51 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
-using TMPro;
 
 namespace SailwindTranslator
 {
     /// <summary>
-    /// Подменяет/дополняет шрифты так, чтобы в TMP-тексте отображалась кириллица.
+    /// Кириллический шрифт ДЛЯ UnityEngine.TextMesh (НЕ TextMeshPro).
     ///
-    /// Стратегия (по надёжности):
-    ///   0. Загрузить .ttf/.otf из папки плагина (рядом с DLL) — самый надёжный источник кириллицы.
-    ///   1. Найти среди загруженных в игре TMP_FontAsset тот, где уже есть кириллица.
-    ///   2. Создать динамический TMP_FontAsset из системного шрифта (несколько имён).
-    ///   3. Зарегистрировать найденный шрифт как ГЛОБАЛЬНЫЙ fallback TMP_Settings.
-    ///   4. Дополнительно: каждому TMP-компоненту добавляем шрифт в fallbackFontAssetTable.
+    /// Открытие из декомпиляции Assembly-CSharp.dll: Sailwind рисует ВЕСЬ текст
+    /// через UnityEngine.TextMesh (3D-текст). TextMeshPro и UnityEngine.UI.Text
+    /// в сцене отсутствуют (сканер показал 0/0). Поэтому:
+    ///   - нужен обычный UnityEngine.Font с кириллицей;
+    ///   - материал этого шрифта надо ставить на MeshRenderer компонента TextMesh.
     ///
-    /// Всё тяжёлое делается ЛЕНИВО (TryRegister вызывается и из ApplyTo, и из таймера),
-    /// т.к. в момент Awake/Init (chainloader startup) шрифты игры ещё не загружены
-    /// (лог показывает "0 TMP_FontAsset загружено" на старте — это нормально).
+    /// Источники кириллического шрифта (по приоритету):
+    ///   0. .ttf/.otf из папки плагина.
+    ///   1. Динамический шрифт из системного (Arial, Segoe UI, ...).
     /// </summary>
     public class FontCyrillicResolver
     {
-        private TMP_FontAsset _cyrFont;
-        private Font _cyrUiFont;
-        private bool _globalRegistered;
-        private bool _triedDisk;
-        private bool _triedScan;
+        private Font _cyrFont;
+        private Material _cyrMaterial;
+        private bool _initialized;
 
-        public TMP_FontAsset CurrentFont => _cyrFont;
+        public Font CurrentFont => _cyrFont;
 
         public void Init()
         {
-            // Не делаем ничего тяжёлого здесь — шрифты ещё не загружены.
-            // Реальная работа в TryRegister(), которая зовётся лениво.
-            Plugin.Log?.LogInfo("[FONT] resolver инициализирован (ленивый режим).");
+            if (_initialized) return;
+            _initialized = true;
 
-            _cyrUiFont = Font.CreateDynamicFontFromOSFont("Arial", 16);
-        }
+            TryLoadFromDisk();
+            if (_cyrFont == null) TryCreateFromOs();
 
-        /// <summary>
-        /// Вызывать периодически и из ApplyTo. Потокобезопасно через флаги (один поток — Unity main).
-        /// </summary>
-        public void TryRegister()
-        {
             if (_cyrFont != null)
             {
-                EnsureGlobalFallback();
-                return;
+                try { _cyrFont.RequestCharactersInTexture(CYRILLIC_SAMPLE, 32); } catch { }
+                _cyrMaterial = _cyrFont.material;
+                Plugin.Log?.LogInfo($"[FONT] кириллический шрифт готов: '{_cyrFont.name}'. " +
+                                    $"(для TextMesh: font + material установятся на компоненты)");
             }
-
-            if (!_triedDisk) { _triedDisk = true; TryLoadFromDisk(); }
-            if (_cyrFont == null && !_triedScan) { _triedScan = true; TryScanLoaded(); }
-            if (_cyrFont == null) { TryCreateFromOsFonts(); }
-
-            EnsureGlobalFallback();
+            else
+            {
+                Plugin.Log?.LogWarning(
+                    "[FONT] Кириллический шрифт НЕ создан. Положи .ttf/.otf с кириллицей " +
+                    "в BepInEx/plugins/SailwindTranslator/. Русский будет квадратиками.");
+            }
         }
 
         private void TryLoadFromDisk()
@@ -64,91 +56,44 @@ namespace SailwindTranslator
             try
             {
                 string dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                if (!Directory.Exists(dir))
-                {
-                    Plugin.Log?.LogWarning($"[FONT] папка плагина не найдена: {dir}");
-                    return;
-                }
+                if (!Directory.Exists(dir)) return;
                 var files = Directory.GetFiles(dir, "*.*")
                     .Where(p => p.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) ||
                                 p.EndsWith(".otf", StringComparison.OrdinalIgnoreCase))
                     .ToList();
-                Plugin.Log?.LogInfo($"[FONT] найдено файлов шрифтов (.ttf/.otf): {files.Count} в {dir}");
+                Plugin.Log?.LogInfo($"[FONT] файлов шрифтов в папке плагина: {files.Count}");
                 foreach (var path in files)
                 {
-                    if (_cyrFont != null) break;
-                    TryLoadOne(path);
-                }
-            }
-            catch (Exception ex)
-            {
-                Plugin.Log?.LogError($"[FONT] ошибка чтения шрифтов с диска: {ex.Message}");
-            }
-        }
-
-        private void TryLoadOne(string path)
-        {
-            string name = Path.GetFileName(path);
-            try
-            {
-                var font = new Font(path);
-                if (font == null)
-                {
-                    Plugin.Log?.LogWarning($"[FONT] '{name}': new Font() -> null");
-                    return;
-                }
-                // Попросим движок загрузить кириллицу в текстуру, иначе CreateFontAsset может дать null
-                try { font.RequestCharactersInTexture(CYRILLIC_SAMPLE, 32); } catch { }
-
-                var asset = CreateCyrillicFontAsset(font, name);
-                if (asset != null)
-                {
-                    _cyrFont = asset;
-                    Plugin.Log?.LogInfo($"[FONT] '{name}' ЗАГРУЖЕН как кириллический шрифт.");
-                }
-                else
-                {
-                    Plugin.Log?.LogWarning($"[FONT] '{name}': CreateFontAsset вернул null (все оверлоады).");
-                }
-            }
-            catch (Exception ex)
-            {
-                Plugin.Log?.LogWarning($"[FONT] '{name}' не загрузился: {ex.Message}");
-            }
-        }
-
-        private void TryScanLoaded()
-        {
-            try
-            {
-                var all = Resources.FindObjectsOfTypeAll<TMP_FontAsset>();
-                Plugin.Log?.LogInfo($"[FONT] загружено TMP_FontAsset: {all.Length}. Ищем с кириллицей...");
-                foreach (var f in all)
-                {
-                    if (f == null || f.name == null) continue;
+                    string name = Path.GetFileName(path);
                     try
                     {
-                        if (f.HasCharacter('А') || f.HasCharacter('а') || f.HasCharacter('р'))
+                        var font = new Font(path);
+                        if (font == null) continue;
+                        try { font.RequestCharactersInTexture(CYRILLIC_SAMPLE, 32); } catch { }
+                        if (FontHasCyrillic(font))
                         {
-                            _cyrFont = f;
-                            Plugin.Log?.LogInfo($"[FONT] Найден шрифт с кириллицей: '{f.name}'.");
+                            _cyrFont = font;
+                            Plugin.Log?.LogInfo($"[FONT] '{name}' загружен как кириллический TextMesh-шрифт. 🎉");
                             return;
                         }
+                        else
+                        {
+                            Plugin.Log?.LogWarning($"[FONT] '{name}': кириллица в нём не обнаружена.");
+                        }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        Plugin.Log?.LogWarning($"[FONT] '{name}' не загрузился: {ex.Message}");
+                    }
                 }
-                // Шрифтов с кириллицей нет, но хотя бы запомним имена для диагностики
-                var names = all.Where(x => x != null && x.name != null).Select(x => x.name).Take(10).ToList();
-                Plugin.Log?.LogInfo($"[FONT] ни один не содержит кириллицу. Имена: " +
-                                    (names.Count == 0 ? "(пусто)" : string.Join(", ", names)));
             }
             catch (Exception ex)
             {
-                Plugin.Log?.LogError($"[FONT] ошибка сканирования: {ex.Message}");
+                Plugin.Log?.LogError($"[FONT] чтение с диска: {ex.Message}");
             }
         }
 
-        private void TryCreateFromOsFonts()
+        private void TryCreateFromOs()
         {
             string[] candidates = { "Arial", "Segoe UI", "Tahoma", "Microsoft Sans Serif", "Verdana", "DejaVu Sans" };
             foreach (var name in candidates)
@@ -156,155 +101,72 @@ namespace SailwindTranslator
                 if (_cyrFont != null) break;
                 try
                 {
-                    var osFont = Font.CreateDynamicFontFromOSFont(name, 16);
-                    if (osFont == null) continue;
-                    try { osFont.RequestCharactersInTexture(CYRILLIC_SAMPLE, 32); } catch { }
-                    var asset = CreateCyrillicFontAsset(osFont, "OS:" + name);
-                    Plugin.Log?.LogInfo($"[FONT] CreateFontAsset(OS:{name}) -> {(asset == null ? "null" : asset.name)}");
-                    if (asset != null) _cyrFont = asset;
+                    var font = Font.CreateDynamicFontFromOSFont(name, 16);
+                    if (font == null) continue;
+                    try { font.RequestCharactersInTexture(CYRILLIC_SAMPLE, 32); } catch { }
+                    if (FontHasCyrillic(font))
+                    {
+                        _cyrFont = font;
+                        Plugin.Log?.LogInfo($"[FONT] создан динамический кириллический шрифт из OS:{name}. 🎉");
+                    }
+                    else
+                    {
+                        Plugin.Log?.LogInfo($"[FONT] OS:{name} не дал кириллицу.");
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Plugin.Log?.LogWarning($"[FONT] OS:{name} упало: {ex.Message}");
+                    Plugin.Log?.LogWarning($"[FONT] OS:{name}: {ex.Message}");
                 }
             }
+        }
+
+        private static bool FontHasCyrillic(Font f)
+        {
+            if (f == null) return false;
+            try
+            {
+                f.RequestCharactersInTexture("Ая0", 32);
+                CharacterInfo info;
+                return f.GetCharacterInfo('А', out info, 32) &&
+                       f.GetCharacterInfo('я', out info, 32);
+            }
+            catch { return false; }
         }
 
         /// <summary>
-        /// Пробует несколько оверлоадов CreateFontAsset (разные версии TMP).
+        /// Применить кириллический шрифт к TextMesh. Важно: для TextMesh при смене
+        /// font надо ещё перезаписать sharedMaterial у MeshRenderer, иначе текст
+        /// не перерисуется.
         /// </summary>
-        private TMP_FontAsset CreateCyrillicFontAsset(Font font, string label)
+        public void ApplyTo(TextMesh target)
         {
-            Type t = typeof(TMP_FontAsset);
-            // 1) CreateFontAsset(Font)
+            if (target == null || _cyrFont == null) return;
             try
             {
-                var m = t.GetMethod("CreateFontAsset", new[] { typeof(Font) });
-                if (m != null)
-                {
-                    var r = m.Invoke(null, new object[] { font }) as TMP_FontAsset;
-                    if (r != null) return r;
-                }
-            }
-            catch { }
-            // 2) CreateFontAsset(Font, int, int)  [samplingPointSize, atlasPadding]
-            try
-            {
-                var m = t.GetMethod("CreateFontAsset", new[] { typeof(Font), typeof(int), typeof(int) });
-                if (m != null)
-                {
-                    var r = m.Invoke(null, new object[] { font, 90, 9 }) as TMP_FontAsset;
-                    if (r != null) return r;
-                }
-            }
-            catch { }
-            // 3) CreateFontAsset(Font, int, int, int, int) и подобные с 4-мя интовыми
-            try
-            {
-                var m = t.GetMethod("CreateFontAsset", new[] { typeof(Font), typeof(int), typeof(int), typeof(int), typeof(int) });
-                if (m != null)
-                {
-                    var r = m.Invoke(null, new object[] { font, 90, 9, 0, 0 }) as TMP_FontAsset;
-                    if (r != null) return r;
-                }
-            }
-            catch { }
-            return null;
-        }
+                var cur = target.font;
+                // Подменяем только если текущий шрифт реально не рисует кириллицу
+                // (чтобы минимально ломать исходный вид текста).
+                bool needsSwap = cur == null || !FontHasCyrillic(cur);
+                if (!needsSwap) return;
 
-        private void EnsureGlobalFallback()
-        {
-            if (_cyrFont == null || _globalRegistered) return;
-            try
-            {
-                Type t = FindType("TMPro.TMP_Settings");
-                if (t == null)
-                {
-                    Plugin.Log?.LogWarning("[FONT] TMP_Settings не найден — глобальный fallback пропущен.");
-                    return;
-                }
-                object settings = GetStaticMember(t, "defaultAsset");
-                if (settings == null)
-                {
-                    Plugin.Log?.LogWarning("[FONT] TMP_Settings.defaultAsset == null (ещё не готово?).");
-                    return;
-                }
-                object fbList = GetInstanceMember(settings, "fallbackFontAssets");
-                if (fbList == null)
-                {
-                    Plugin.Log?.LogWarning("[FONT] fallbackFontAssets == null.");
-                    return;
-                }
-                bool contains = (bool)fbList.GetType().GetMethod("Contains").Invoke(fbList, new object[] { _cyrFont });
-                if (!contains)
-                {
-                    fbList.GetType().GetMethod("Add").Invoke(fbList, new object[] { _cyrFont });
-                }
-                _globalRegistered = true;
-                Plugin.Log?.LogInfo($"[FONT] '{_cyrFont.name}' зарегистрирован как ГЛОБАЛЬНЫЙ TMP-fallback. 🎉");
+                target.font = _cyrFont;
+                try { target.GetComponent<Renderer>().sharedMaterial = _cyrMaterial; } catch { }
+                try { _cyrFont.RequestCharactersInTexture(CYRILLIC_SAMPLE, target.fontSize); } catch { }
             }
             catch (Exception ex)
             {
-                Plugin.Log?.LogError($"[FONT] глобальный fallback не удался: {ex.Message}");
+                Plugin.Log?.LogError($"[FONT] ApplyTo(TextMesh) не удался: {ex.Message}");
             }
         }
 
-        public void ApplyTo(TMP_Text target)
-        {
-            if (target == null) return;
-            TryRegister();
-            if (_cyrFont == null) return;
-
-            var cur = target.font;
-            if (cur == null) { target.font = _cyrFont; return; }
-            if (cur == _cyrFont) return;
-            try
-            {
-                if (!cur.fallbackFontAssetTable.Contains(_cyrFont))
-                    cur.fallbackFontAssetTable.Add(_cyrFont);
-            }
-            catch (Exception ex)
-            {
-                Plugin.Log?.LogError($"[FONT] ApplyTo(TMP) не удался: {ex.Message}");
-            }
-        }
-
+        // Совместимость: старый UI.Text-путь (если где-то всё же попадётся).
         public void ApplyTo(UnityEngine.UI.Text target)
         {
-            if (_cyrUiFont == null || target == null) return;
-            if (target.font == _cyrUiFont) return;
-            target.font = _cyrUiFont;
+            // UI.Text не используется в игре (0 экземпляров), пропускаем.
         }
 
         private const string CYRILLIC_SAMPLE =
             "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя";
-
-        // ---------- reflection-хелперы ----------
-
-        private static Type FindType(string fullName)
-        {
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                try { var t = asm.GetType(fullName); if (t != null) return t; } catch { }
-            }
-            return null;
-        }
-
-        private static object GetStaticMember(Type t, string name)
-        {
-            var p = t.GetProperty(name, BindingFlags.Public | BindingFlags.Static | BindingFlags.NonPublic);
-            if (p != null) return p.GetValue(null, null);
-            var f = t.GetField(name, BindingFlags.Public | BindingFlags.Static | BindingFlags.NonPublic);
-            return f?.GetValue(null);
-        }
-
-        private static object GetInstanceMember(object obj, string name)
-        {
-            var t = obj.GetType();
-            var p = t.GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic);
-            if (p != null) return p.GetValue(obj, null);
-            var f = t.GetField(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic);
-            return f?.GetValue(obj);
-        }
     }
 }

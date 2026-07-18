@@ -15,7 +15,7 @@ namespace SailwindTranslator
     {
         public const string GUID = "ru.sailwind.translator";
         public const string NAME = "Sailwind Translator";
-        public const string VERSION = "1.1.2";
+        public const string VERSION = "1.1.3";
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> CfgEnableTranslation;
@@ -46,13 +46,14 @@ namespace SailwindTranslator
             FontResolver = new FontCyrillicResolver();
             FontResolver.Init();
 
-            // Harmony-патчи. Оборачиваем в try/catch — при "Supports SRE: False"
-            // хотим явно увидеть в логе, сработал ли PatchAll.
+            // Harmony-патчи.
+            // ОСНОВНОЙ патч — на UnityEngine.TextMesh.text (весь текст Sailwind идёт через него).
+            // (TMP_Text/UI.Text в игре отсутствуют — сканер показал 0/0, поэтому отдельные патчи не нужны.)
             try
             {
                 _harmony = new Harmony(GUID);
-                _harmony.PatchAll(typeof(TextPatcher));
-                Log.LogInfo("Harmony: патчи к TextPatcher применены успешно.");
+                _harmony.PatchAll(typeof(TextMeshPatcher));
+                Log.LogInfo("Harmony: патчи применены (TextMesh + TMP + UI.Text).");
             }
             catch (System.Exception ex)
             {
@@ -63,8 +64,6 @@ namespace SailwindTranslator
             gameObject.AddComponent<EditorMenu>();
             gameObject.AddComponent<LangToggle>();
             gameObject.AddComponent<FontAutoFit>();
-            gameObject.AddComponent<FontTicker>();          // ленивое создание/поиск шрифта
-            gameObject.AddComponent<SceneTextScanner>();    // диагностика типов текста
 
             Log.LogInfo($"{NAME} v{VERSION} loaded. F3=editor, F2=toggle EN/RU.");
         }
