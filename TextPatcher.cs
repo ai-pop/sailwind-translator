@@ -11,9 +11,25 @@ namespace SailwindTranslator
     /// Harmony-патчи на set_text у TMP_Text и UnityEngine.UI.Text.
     /// Любой вызов setText перехватывается, английская строка ищется в словаре,
     /// при совпадении подменяется на русский перевод.
+    ///
+    /// Диагностика: при первом срабатывании каждого патча пишем в лог —
+    /// это подтверждает, что Harmony работает (в т.ч. при Supports SRE: False).
     /// </summary>
     public static class TextPatcher
     {
+        // Одноразовые флаги — чтобы не спамить лог, но видеть, что патч сработал.
+        private static bool _tmpSetterFired;
+        private static bool _tmpSetTextFired;
+        private static bool _uiSetterFired;
+        private static int _matchedCount;
+        private static int _unmatchedCount;
+
+        private static string Trunc(string s)
+        {
+            if (s == null) return "<null>";
+            return s.Length <= 60 ? s : s.Substring(0, 60) + "…";
+        }
+
         private static string TryTranslate(string text, object instance)
         {
             if (text == null) return null;
@@ -33,10 +49,17 @@ namespace SailwindTranslator
             if (ContainsCyrillic(text)) return text;
 
             var ru = Plugin.Manager.Get(text);
-            if (ru != null) return ru;
+            if (ru != null)
+            {
+                _matchedCount++;
+                if (_matchedCount <= 3)
+                    Plugin.Log?.LogInfo($"[DIAG] перевод применён: '{Trunc(text)}' -> '{Trunc(ru)}'");
+                return ru;
+            }
 
-            // Нет перевода — дамп
-            Plugin.Manager.DumpUntranslated(text);
+            // Нет перевода — дамп для последующего наполнения словаря
+            _unmatchedCount++;
+            Plugin.Manager?.DumpUntranslated(text);
             return text;
         }
 
@@ -56,10 +79,15 @@ namespace SailwindTranslator
         [HarmonyPrefix]
         public static void TMP_Text_SetText_Prefix(ref string value, TMP_Text __instance)
         {
+            if (!_tmpSetterFired)
+            {
+                _tmpSetterFired = true;
+                Plugin.Log?.LogInfo("[DIAG] ПАТЧ СРАБОТАЛ: TMP_Text.text setter. Значит Harmony работает.");
+            }
             try
             {
                 // Подменяем шрифт на кириллический при первом обращении
-                if (value != null && Plugin.CfgLanguage.Value == "ru" && Plugin.FontResolver != null)
+                if (value != null && Plugin.CfgLanguage != null && Plugin.CfgLanguage.Value == "ru" && Plugin.FontResolver != null)
                 {
                     Plugin.FontResolver.ApplyTo(__instance);
                 }
@@ -67,7 +95,7 @@ namespace SailwindTranslator
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogError($"TMP set_text prefix failed: {ex}");
+                Plugin.Log?.LogError($"TMP set_text prefix failed: {ex}");
             }
         }
 
@@ -76,18 +104,20 @@ namespace SailwindTranslator
         [HarmonyPrefix]
         public static void TMP_Text_SetTextMethod_Prefix(ref string text)
         {
+            if (!_tmpSetTextFired)
+            {
+                _tmpSetTextFired = true;
+                Plugin.Log?.LogInfo("[DIAG] ПАТЧ СРАБОТАЛ: TMP_Text.SetText(string).");
+            }
             try
             {
                 text = TryTranslate(text, null);
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogError($"TMP SetText method prefix failed: {ex}");
+                Plugin.Log?.LogError($"TMP SetText method prefix failed: {ex}");
             }
         }
-
-        // У некоторых игр через SetCharArray / set_faceColor — обычный кейс, можно не патчить.
-        // При необходимости добавить ещё здесь.
 
         // ===== Старый UnityEngine.UI.Text =====
 
@@ -95,9 +125,14 @@ namespace SailwindTranslator
         [HarmonyPrefix]
         public static void UI_Text_SetText_Prefix(ref string value, Text __instance)
         {
+            if (!_uiSetterFired)
+            {
+                _uiSetterFired = true;
+                Plugin.Log?.LogInfo("[DIAG] ПАТЧ СРАБОТАЛ: UI.Text.text setter.");
+            }
             try
             {
-                if (value != null && Plugin.CfgLanguage.Value == "ru" && Plugin.FontResolver != null)
+                if (value != null && Plugin.CfgLanguage != null && Plugin.CfgLanguage.Value == "ru" && Plugin.FontResolver != null)
                 {
                     Plugin.FontResolver.ApplyTo(__instance);
                 }
@@ -105,7 +140,7 @@ namespace SailwindTranslator
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogError($"UI.Text set_text prefix failed: {ex}");
+                Plugin.Log?.LogError($"UI.Text set_text prefix failed: {ex}");
             }
         }
     }

@@ -15,7 +15,7 @@ namespace SailwindTranslator
     {
         public const string GUID = "ru.sailwind.translator";
         public const string NAME = "Sailwind Translator";
-        public const string VERSION = "1.1.0";
+        public const string VERSION = "1.1.1";
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> CfgEnableTranslation;
@@ -46,9 +46,18 @@ namespace SailwindTranslator
             FontResolver = new FontCyrillicResolver();
             FontResolver.Init();
 
-            // Harmony-патчи
-            _harmony = new Harmony(GUID);
-            _harmony.PatchAll(typeof(TextPatcher));
+            // Harmony-патчи. Оборачиваем в try/catch — при "Supports SRE: False"
+            // хотим явно увидеть в логе, сработал ли PatchAll.
+            try
+            {
+                _harmony = new Harmony(GUID);
+                _harmony.PatchAll(typeof(TextPatcher));
+                Log.LogInfo("Harmony: патчи к TextPatcher применены успешно.");
+            }
+            catch (System.Exception ex)
+            {
+                Log.LogError($"Harmony PatchAll УПАЛ (патчи НЕ применены): {ex}");
+            }
 
             // Компоненты
             gameObject.AddComponent<EditorMenu>();
