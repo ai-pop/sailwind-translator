@@ -1,0 +1,29 @@
+# Build output
+plugin_src/bin/
+plugin_src/obj/
+**/bin/
+**/obj/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# OS
+.Desktop
+Thumbs.db
+.DS_Store
+
+# NuGet
+.nuget/
+
+# Временные файлы
+*.tmp
+*.bak
+*~
+
+# Релизные ассеты (собираются отдельно, не в репо)
+release_body*.md
+make_release*.py
