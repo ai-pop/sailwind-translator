@@ -15,12 +15,10 @@ namespace SailwindTranslator
     {
         public const string GUID = "ru.sailwind.translator";
         public const string NAME = "Sailwind Translator";
-        public const string VERSION = "1.2.5";
+        public const string VERSION = "1.2.6";
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> CfgEnableTranslation;
-        internal static ConfigEntry<bool> CfgAutoFit;
-        internal static ConfigEntry<float> CfgAutoFitMinScale;
         internal static ConfigEntry<bool> CfgDumpUntranslated;
         internal static ConfigEntry<bool> CfgLiveTranslate;
         internal static ConfigEntry<int> CfgLiveWorkers;
@@ -37,8 +35,6 @@ namespace SailwindTranslator
 
             // Конфиг в BepInEx/config/SailwindTranslator.cfg
             CfgEnableTranslation   = Config.Bind("General", "Enable", true, "Включить подмену текста");
-            CfgAutoFit             = Config.Bind("General", "AutoFitFont", true, "Авто-уменьшение шрифта, если текст длиннее оригинала");
-            CfgAutoFitMinScale     = Config.Bind("General", "AutoFitMinScale", 0.6f, "Минимальный множитель размера шрифта (0.5–1.0)");
             CfgDumpUntranslated    = Config.Bind("General", "DumpUntranslated", false, "Записывать непереведённые строки в untranslated.csv");
             CfgLiveTranslate       = Config.Bind("General", "LiveTranslate", true, "Переводить незнакомый текст онлайн в реальном времени (нужен интернет)");
             CfgLiveWorkers         = Config.Bind("General", "LiveWorkers", 4, "Кол-во фоновых потоков перевода (1-8). Больше = быстрее, но больше нагрузки на сеть.");
@@ -67,7 +63,6 @@ namespace SailwindTranslator
             // Компоненты
             gameObject.AddComponent<EditorMenu>();
             gameObject.AddComponent<LangToggle>();
-            gameObject.AddComponent<FontAutoFit>();
             gameObject.AddComponent<SceneTranslator>();   // активный перевод зашитого текста
 
             // Живой переводчик: онлайн-перевод незнакомых строк в фоне + кеш.
