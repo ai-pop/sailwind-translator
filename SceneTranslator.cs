@@ -6,35 +6,29 @@ using UnityEngine.SceneManagement;
 namespace SailwindTranslator
 {
     /// <summary>
-    /// Активный переводчик сцены.
+    /// Активный переводчик сцены — переводит ВЕСЬ видимый текст в реальном времени.
     ///
-    /// Проблема, которую решает: Harmony-патч на TextMesh.text ловит только
-    /// ПРОГРАММНЫЕ вызовы (LookUI.ShowLookText, UpdateText...). Но текст кнопок
-    /// главного меню («New Game», «Options»...) ЗАШИТ в префабы и выставляется
-    /// движком при загрузке сцены В ОБХОД C#-сеттера — сеттер-патч его не видит.
+    /// - Периодически (и на каждой загрузке сцены) перебирает все TextMesh.
+    /// - Для каждой строки: если перевод уже есть в словаре (ручной или ранее
+    ///   закешированный живым переводчиком) — применяет его.
+    /// - Если перевода нет — отдаёт строку в LiveTranslator (он переведёт онлайн,
+    ///   положит в словарь и взведёт NeedsRescan — тогда перевод подставится
+    ///   следующим проходом).
+    /// - Когда LiveTranslator докладывает о новых переводах (NeedsRescan=true),
+    ///   запускает внеочередной проход — так текст обновляется «на лету».
+    /// - EN/RU (F2) восстанавливает английские оригиналы.
     ///
-    /// Решение: периодически (и на каждой загрузке сцены) перебираем все
-    /// TextMesh в сцене, читаем их текущий .text и переводим напрямую.
-    /// Оригиналы сохраняем — чтобы переключение EN/RU (F2) работало корректно.
+    /// Динамические строки (lookText при наведении) дополнительно ловятся
+    /// Harmony-патчем на TextMesh.text — он тоже ставит незнакомки в очередь.
     /// </summary>
     public class SceneTranslator : MonoBehaviour
     {
         public static SceneTranslator Instance;
 
-        // Оригинальный (английский) текст по экземпляру TextMesh — для отката на EN.
         private static readonly Dictionary<TextMesh, string> _originals = new Dictionary<TextMesh, string>();
 
         private float _timer = 0f;
         private const float INTERVAL = 2f;
-        private int _runs = 0;
-        private const int MAX_RUNS = 20; // ~40 сек активного скана, дальше — только по sceneLoaded
-        private bool _contentDumped;
-
-        private static string Trunc(string s)
-        {
-            if (s == null) return "<null>";
-            return s.Length <= 80 ? s : s.Substring(0, 80) + "…";
-        }
 
         private void Start()
         {
@@ -50,26 +44,28 @@ namespace SailwindTranslator
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
-            // Сцена загрузилась — переведём чуть погодя (даём объектам инициализироваться).
-            _contentDumped = false; // в новой сцене — свежий дамп текста
             CancelInvoke(nameof(ScanNow));
             Invoke(nameof(ScanNow), 1f);
             Invoke(nameof(ScanNow), 3f);
-            _runs = 0; // продолжаем активный скан после смены сцены
+            Invoke(nameof(ScanNow), 6f);
         }
 
         private void Update()
         {
-            if (_runs >= MAX_RUNS) return;
+            // Живой переводчик принёс новые переводы — пересканируем сразу.
+            if (LiveTranslator.NeedsRescan)
+            {
+                LiveTranslator.NeedsRescan = false;
+                ScanNow();
+                _timer = 0f;
+                return;
+            }
             _timer += Time.deltaTime;
             if (_timer < INTERVAL) return;
             _timer = 0f;
             ScanNow();
         }
 
-        /// <summary>
-        /// Вызывается извне (LangToggle) после переключения языка.
-        /// </summary>
         public static void OnLanguageChanged()
         {
             Instance?.ScanNow();
@@ -77,40 +73,16 @@ namespace SailwindTranslator
 
         public void ScanNow()
         {
-            _runs++;
             try
             {
                 bool ru = Plugin.CfgLanguage != null && Plugin.CfgLanguage.Value == "ru";
                 var meshes = FindObjectsOfType<TextMesh>();
-                int translated = 0, restored = 0;
-
-                // ОДНОРАЗОВЫЙ дамп реального текста в сцене — чтобы увидеть, какие строки
-                // там на самом деле (для наполнения словаря). Без этого мы гадаем.
-                if (!_contentDumped)
-                {
-                    _contentDumped = true;
-                    var seen = new HashSet<string>();
-                    int nonEmpty = 0;
-                    foreach (var tm in meshes)
-                    {
-                        if (tm == null) continue;
-                        string txt = tm.text;
-                        if (string.IsNullOrWhiteSpace(txt)) continue;
-                        nonEmpty++;
-                        if (seen.Add(txt))
-                            Plugin.Log?.LogInfo("[SCAN-TEXT] '" + Trunc(txt) + "'  (obj: " + (tm.gameObject != null ? tm.gameObject.name : "?") + ")");
-                        if (seen.Count >= 40) break;
-                    }
-                    Plugin.Log?.LogInfo(nonEmpty == 0
-                        ? "[SCAN-TEXT] Все " + meshes.Length + " TextMesh пусты — текст появляется при наведении на объекты (lookText). Наведись на штурвал/лебёдку/дверь и пришли новый лог."
-                        : "[SCAN-TEXT] непустых TextMesh: " + nonEmpty + " из " + meshes.Length + ". Пришли лог — добавлю строки в словарь.");
-                }
+                int applied = 0, restored = 0, queued = 0;
 
                 foreach (var tm in meshes)
                 {
                     if (tm == null) continue;
 
-                    // Шрифт — всегда (если RU), чтобы кириллица рисовалась.
                     if (ru && Plugin.FontResolver != null)
                         Plugin.FontResolver.ApplyTo(tm);
 
@@ -119,26 +91,26 @@ namespace SailwindTranslator
 
                     if (ru)
                     {
-                        // Запоминаем оригинал (только английский — не перезаписываем русским).
                         if (!_originals.ContainsKey(tm) && !ContainsCyrillic(cur))
                             _originals[tm] = cur;
 
-                        if (ContainsCyrillic(cur)) continue; // уже переведено
+                        if (ContainsCyrillic(cur)) continue;
 
                         var ruText = Plugin.Manager?.Get(cur);
                         if (!string.IsNullOrEmpty(ruText) && ruText != cur)
                         {
                             tm.text = ruText;
-                            translated++;
+                            applied++;
                         }
-                        else if (Plugin.CfgDumpUntranslated != null && Plugin.CfgDumpUntranslated.Value)
+                        else
                         {
-                            Plugin.Manager?.DumpUntranslated(cur);
+                            // Нет перевода — в очередь живому переводчику.
+                            LiveTranslator.Enqueue(cur);
+                            queued++;
                         }
                     }
                     else
                     {
-                        // EN — восстанавливаем оригинал, если переводили ранее.
                         if (_originals.TryGetValue(tm, out var orig) && orig != cur)
                         {
                             tm.text = orig;
@@ -147,9 +119,7 @@ namespace SailwindTranslator
                     }
                 }
 
-                if (_runs <= 6)
-                    Plugin.Log?.LogInfo(
-                        $"[SCAN] проход {_runs}: TextMesh={meshes.Length}, переведено={translated}, восстановлено={restored}");
+                Plugin.Log?.LogInfo($"[SCAN] TextMesh={meshes.Length}, применено={applied}, в очередь={queued}, восстановлено={restored}");
             }
             catch (Exception ex)
             {

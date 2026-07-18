@@ -20,14 +20,6 @@ namespace SailwindTranslator
     public static class TextMeshPatcher
     {
         private static bool _fired;
-        private static int _matched;
-        private static int _unmatched;
-
-        private static string Trunc(string s)
-        {
-            if (s == null) return "<null>";
-            return s.Length <= 60 ? s : s.Substring(0, 60) + "…";
-        }
 
         private static string TryTranslate(string text, TextMesh instance)
         {
@@ -54,15 +46,12 @@ namespace SailwindTranslator
             var ru = Plugin.Manager.Get(text);
             if (ru != null)
             {
-                _matched++;
-                if (_matched <= 5)
-                    Plugin.Log?.LogInfo($"[DIAG] перевод: '{Trunc(text)}' -> '{Trunc(ru)}'");
                 return ru;
             }
 
-            // Дамп английской строки для последующего наполнения словаря
-            _unmatched++;
-            Plugin.Manager?.DumpUntranslated(text);
+            // Нет перевода в словаре — отдаём живому переводчику (переведёт онлайн в фоне,
+            // закеширует, и при следующем кадре сканер подставит результат).
+            LiveTranslator.Enqueue(text);
             return text;
         }
 

@@ -262,6 +262,15 @@ namespace SailwindTranslator
             }
         }
 
+        public bool Has(string english)
+        {
+            if (string.IsNullOrEmpty(english)) return true;
+            lock (_lock)
+            {
+                return _dict.ContainsKey(english) || _dict.ContainsKey(english.Trim());
+            }
+        }
+
         public void Set(string english, string russian)
         {
             if (string.IsNullOrEmpty(english)) return;

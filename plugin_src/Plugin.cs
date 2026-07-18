@@ -15,13 +15,14 @@ namespace SailwindTranslator
     {
         public const string GUID = "ru.sailwind.translator";
         public const string NAME = "Sailwind Translator";
-        public const string VERSION = "1.1.5";
+        public const string VERSION = "1.2.0";
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> CfgEnableTranslation;
         internal static ConfigEntry<bool> CfgAutoFit;
         internal static ConfigEntry<float> CfgAutoFitMinScale;
         internal static ConfigEntry<bool> CfgDumpUntranslated;
+        internal static ConfigEntry<bool> CfgLiveTranslate;
         internal static ConfigEntry<string> CfgLanguage;
 
         internal static TranslationManager Manager;
@@ -37,7 +38,8 @@ namespace SailwindTranslator
             CfgEnableTranslation   = Config.Bind("General", "Enable", true, "Включить подмену текста");
             CfgAutoFit             = Config.Bind("General", "AutoFitFont", true, "Авто-уменьшение шрифта, если текст длиннее оригинала");
             CfgAutoFitMinScale     = Config.Bind("General", "AutoFitMinScale", 0.6f, "Минимальный множитель размера шрифта (0.5–1.0)");
-            CfgDumpUntranslated    = Config.Bind("General", "DumpUntranslated", true, "Записывать непереведённые строки в untranslated.csv");
+            CfgDumpUntranslated    = Config.Bind("General", "DumpUntranslated", false, "Записывать непереведённые строки в untranslated.csv");
+            CfgLiveTranslate       = Config.Bind("General", "LiveTranslate", true, "Переводить незнакомый текст онлайн в реальном времени (нужен интернет)");
             CfgLanguage            = Config.Bind("General", "Language", "ru", "Активный язык: ru / en");
 
             Manager = new TranslationManager();
@@ -66,11 +68,15 @@ namespace SailwindTranslator
             gameObject.AddComponent<FontAutoFit>();
             gameObject.AddComponent<SceneTranslator>();   // активный перевод зашитого текста
 
-            Log.LogInfo($"{NAME} v{VERSION} loaded. F3=editor, F2=toggle EN/RU.");
+            // Живой переводчик: онлайн-перевод незнакомых строк в фоне + кеш.
+            LiveTranslator.Start();
+
+            Log.LogInfo(NAME + " v" + VERSION + " loaded. F3=editor, F2=toggle EN/RU. LiveTranslate=" + CfgLiveTranslate.Value);
         }
 
         private void OnDestroy()
         {
+            LiveTranslator.Stop();
             _harmony?.UnpatchSelf();
             Manager?.Save();
         }

@@ -54,15 +54,12 @@ namespace SailwindTranslator
             var ru = Plugin.Manager.Get(text);
             if (ru != null)
             {
-                _matched++;
-                if (_matched <= 5)
-                    Plugin.Log?.LogInfo($"[DIAG] перевод: '{Trunc(text)}' -> '{Trunc(ru)}'");
                 return ru;
             }
 
-            // Дамп английской строки для последующего наполнения словаря
-            _unmatched++;
-            Plugin.Manager?.DumpUntranslated(text);
+            // Нет перевода в словаре — отдаём живому переводчику (переведёт онлайн в фоне,
+            // закеширует, и при следующем кадре сканер подставит результат).
+            LiveTranslator.Enqueue(text);
             return text;
         }
 
