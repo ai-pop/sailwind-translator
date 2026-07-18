@@ -15,7 +15,7 @@ namespace SailwindTranslator
     {
         public const string GUID = "ru.sailwind.translator";
         public const string NAME = "Sailwind Translator";
-        public const string VERSION = "1.2.0";
+        public const string VERSION = "1.2.1";
 
         internal static ManualLogSource Log;
         internal static ConfigEntry<bool> CfgEnableTranslation;
@@ -23,6 +23,7 @@ namespace SailwindTranslator
         internal static ConfigEntry<float> CfgAutoFitMinScale;
         internal static ConfigEntry<bool> CfgDumpUntranslated;
         internal static ConfigEntry<bool> CfgLiveTranslate;
+        internal static ConfigEntry<int> CfgLiveWorkers;
         internal static ConfigEntry<string> CfgLanguage;
 
         internal static TranslationManager Manager;
@@ -40,6 +41,7 @@ namespace SailwindTranslator
             CfgAutoFitMinScale     = Config.Bind("General", "AutoFitMinScale", 0.6f, "Минимальный множитель размера шрифта (0.5–1.0)");
             CfgDumpUntranslated    = Config.Bind("General", "DumpUntranslated", false, "Записывать непереведённые строки в untranslated.csv");
             CfgLiveTranslate       = Config.Bind("General", "LiveTranslate", true, "Переводить незнакомый текст онлайн в реальном времени (нужен интернет)");
+            CfgLiveWorkers         = Config.Bind("General", "LiveWorkers", 4, "Кол-во фоновых потоков перевода (1-8). Больше = быстрее, но больше нагрузки на сеть.");
             CfgLanguage            = Config.Bind("General", "Language", "ru", "Активный язык: ru / en");
 
             Manager = new TranslationManager();

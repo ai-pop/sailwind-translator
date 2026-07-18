@@ -143,19 +143,18 @@ namespace SailwindTranslator
             if (target == null || _cyrFont == null) return;
             try
             {
-                var cur = target.font;
-                // Подменяем только если текущий шрифт реально не рисует кириллицу
-                // (чтобы минимально ломать исходный вид текста).
-                bool needsSwap = cur == null || !FontHasCyrillic(cur);
-                if (!needsSwap) return;
-
-                target.font = _cyrFont;
+                // ВАЖНО: всегда подменяем шрифт на выбранный пользователем, без
+                // "умной" проверки FontHasCyrillic на текущем шрифте — она ложно
+                // срабатывала, и выбранный .ttf не применялся. Пользователь положил
+                // шрифт в папку = хочет именно его.
+                if (target.font != _cyrFont)
+                    target.font = _cyrFont;
                 try { target.GetComponent<Renderer>().sharedMaterial = _cyrMaterial; } catch { }
                 try { _cyrFont.RequestCharactersInTexture(CYRILLIC_SAMPLE, target.fontSize); } catch { }
             }
             catch (Exception ex)
             {
-                Plugin.Log?.LogError($"[FONT] ApplyTo(TextMesh) не удался: {ex.Message}");
+                Plugin.Log?.LogError("[FONT] ApplyTo(TextMesh) не удался: " + ex.Message);
             }
         }
 

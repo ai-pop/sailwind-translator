@@ -9,21 +9,22 @@ namespace SailwindTranslator
 {
     /// <summary>
     /// Живой переводчик: переводит ЛЮБОЙ английский текст в реальном времени
-    /// через бесплатный онлайн-API (MyMemory, без ключа) и кеширует результат
-    /// в translations.json. Второй запуск — мгновенно из кеша.
+    /// и кеширует результат в translations.json.
     ///
-    /// Никакого ручного составления словаря: что увидел в сцене — то и перевёл.
-    /// Ручные правки (через F3) по-прежнему имеют приоритет (читаются первыми).
+    /// Провайдеры (по приоритету):
+    ///   1. Google Translate (endpoint gtx, без ключа, без жёстких лимитов) — быстрый.
+    ///   2. MyMemory (бесплатный, без ключа) — фоллбэк.
     ///
-    /// Перевод идёт в фоновом потоке, чтобы не фризить игру. Главный поток только
-    /// ставит строки в очередь и читает готовый результат из словаря.
+    /// Несколько фоновых потоков для скорости. Главный поток только ставит строки
+    /// в очередь и читает готовый результат из словаря.
     /// </summary>
     public static class LiveTranslator
     {
         private static readonly HashSet<string> _queued = new HashSet<string>();
         private static readonly HashSet<string> _inProgress = new HashSet<string>();
+        private static readonly HashSet<string> _failed = new HashSet<string>();
         private static readonly object _lock = new object();
-        private static Thread _thread;
+        private static readonly List<Thread> _threads = new List<Thread>();
         private static volatile bool _running;
         private static DateTime _lastSave = DateTime.MinValue;
 
@@ -34,33 +35,39 @@ namespace SailwindTranslator
         {
             if (_running) return;
             _running = true;
-            // Включаем TLS 1.2 для HTTPS на старом Mono (число 3072 = Tls12).
             try { ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072; } catch { }
-            _thread = new Thread(Worker) { IsBackground = true, Name = "SailwindTranslator.Live" };
-            _thread.Start();
-            Plugin.Log?.LogInfo("[LIVE] фоновый переводчик запущен (MyMemory API).");
+            try { ServicePointManager.DefaultConnectionLimit = 8; } catch { }
+
+            int workers = Plugin.CfgLiveWorkers != null ? Plugin.CfgLiveWorkers.Value : 3;
+            for (int i = 0; i < workers; i++)
+            {
+                var t = new Thread(Worker) { IsBackground = true, Name = "SailwindTranslator.Live#" + i };
+                _threads.Add(t);
+                t.Start();
+            }
+            Plugin.Log?.LogInfo("[LIVE] фоновый переводчик запущен: " + workers + " поток(ов), Google+MyMemory.");
         }
 
         public static void Stop()
         {
             _running = false;
-            lock (_lock) Monitor.Pulse(_lock);
+            lock (_lock) Monitor.PulseAll(_lock);
         }
 
-        /// <summary>Поставить английскую строку в очередь на перевод (если ещё не переведена).</summary>
         public static void Enqueue(string english)
         {
-            if (!Plugin.CfgLiveTranslate.Value) return;
+            if (Plugin.CfgLiveTranslate == null || !Plugin.CfgLiveTranslate.Value) return;
             if (string.IsNullOrWhiteSpace(english)) return;
-            if (ContainsCyrillic(english)) return; // уже не английский
-            if (english.Length > 500) return;       // лимит API
+            if (ContainsCyrillic(english)) return;
+            if (english.Length > 500) return;
 
             lock (_lock)
             {
                 if (_queued.Contains(english) || _inProgress.Contains(english)) return;
-                if (Plugin.Manager != null && Plugin.Manager.Has(english)) return; // уже переведено/в словаре
+                if (_failed.Contains(english)) return; // уже пробовали — не получилось
+                if (Plugin.Manager != null && Plugin.Manager.Has(english)) return;
                 _queued.Add(english);
-                Monitor.Pulse(_lock);
+                Monitor.PulseAll(_lock);
             }
         }
 
@@ -80,14 +87,19 @@ namespace SailwindTranslator
                 if (item == null) continue;
 
                 string ru = null;
-                try { ru = TranslateOnline(item); }
-                catch (Exception ex) { Plugin.Log?.LogWarning("[LIVE] ошибка перевода '" + Trunc(item) + "': " + ex.Message); }
+                try { ru = TranslateGoogle(item); }
+                catch (Exception ex) { Plugin.Log?.LogWarning("[LIVE] Google не ответил для '" + Trunc(item) + "': " + ex.Message); }
+
+                if (string.IsNullOrEmpty(ru) || ru == item)
+                {
+                    try { ru = TranslateMyMemory(item); }
+                    catch (Exception ex) { Plugin.Log?.LogWarning("[LIVE] MyMemory не ответил: " + ex.Message); }
+                }
 
                 if (!string.IsNullOrEmpty(ru) && ru != item)
                 {
                     Plugin.Manager?.Set(item, ru);
                     NeedsRescan = true;
-                    // дебаунс сохранения: не чаще раза в 3 сек
                     if ((DateTime.UtcNow - _lastSave).TotalSeconds > 3)
                     {
                         Plugin.Manager?.Save();
@@ -95,27 +107,52 @@ namespace SailwindTranslator
                     }
                     Plugin.Log?.LogInfo("[LIVE] переведено: '" + Trunc(item) + "' -> '" + Trunc(ru) + "'");
                 }
+                else
+                {
+                    lock (_lock) _failed.Add(item);
+                }
 
                 lock (_lock) _inProgress.Remove(item);
-                Thread.Sleep(400); // бережём лимиты API
+                Thread.Sleep(80); // лёгкая пауза между запросами
             }
         }
 
-        private static string TranslateOnline(string en)
+        // Google Translate (неофициальный endpoint gtx). Без ключа. Быстро.
+        private static string TranslateGoogle(string en)
+        {
+            string url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ru&dt=t&q=" + Uri.EscapeDataString(en);
+            using (var wc = new WebClient { Encoding = Encoding.UTF8 })
+            {
+                wc.Headers[HttpRequestHeader.UserAgent] = "Mozilla/5.0";
+                string json = wc.DownloadString(url);
+                // Ответ: [[["перевод","оригинал",...],...],...]
+                var sb = new StringBuilder();
+                var matches = Regex.Matches(json, @"\[\[""(.*?)"",""(.*?)""");
+                foreach (Match m in matches)
+                    sb.Append(Unescape(m.Groups[1].Value));
+                return sb.Length == 0 ? null : sb.ToString();
+            }
+        }
+
+        private static string TranslateMyMemory(string en)
         {
             string url = "https://api.mymemory.translated.net/get?q=" + Uri.EscapeDataString(en) + "&langpair=en|ru";
             using (var wc = new WebClient { Encoding = Encoding.UTF8 })
             {
                 string json = wc.DownloadString(url);
-                // MyMemory: { "responseData": { "translatedText": "..." }, ... }
                 var m = Regex.Match(json, @"""translatedText""\s*:\s*""((?:[^""\\]|\\.)*)""");
                 if (!m.Success) return null;
-                string txt = m.Groups[1].Value;
-                txt = Regex.Replace(txt, @"\\u([0-9a-fA-F]{4})", me => ((char)Convert.ToInt32(me.Groups[1].Value, 16)).ToString());
-                txt = txt.Replace("\\n", "\n").Replace("\\\"", "\"").Replace("\\\\", "\\");
+                string txt = Unescape(m.Groups[1].Value);
                 if (txt.IndexOf("MYMEMORY WARNING", StringComparison.OrdinalIgnoreCase) >= 0) return null;
                 return txt;
             }
+        }
+
+        private static string Unescape(string s)
+        {
+            s = Regex.Replace(s, @"\\u([0-9a-fA-F]{4})", me => ((char)Convert.ToInt32(me.Groups[1].Value, 16)).ToString());
+            s = s.Replace("\\n", "\n").Replace("\\\"", "\"").Replace("\\\\", "\\").Replace("\\/", "/");
+            return s;
         }
 
         private static bool ContainsCyrillic(string s)

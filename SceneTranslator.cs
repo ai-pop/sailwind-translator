@@ -28,7 +28,7 @@ namespace SailwindTranslator
         private static readonly Dictionary<TextMesh, string> _originals = new Dictionary<TextMesh, string>();
 
         private float _timer = 0f;
-        private const float INTERVAL = 2f;
+        private const float INTERVAL = 0.5f;
 
         private void Start()
         {
