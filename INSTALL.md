@@ -23,7 +23,7 @@
 ### 2. Скачайте и распакуйте пакет
 
 1. Перейдите на [страницу последнего релиза](https://github.com/ai-pop/sailwind-translator/releases/latest).
-2. Скачайте файл `sailwind-translator-1.3.3-mono.zip` (или `-il2cpp.zip`).
+2. Скачайте файл `sailwind-translator-1.3.3-mono.zip` (или `sailwind-translator-1.3.3-il2cpp.zip`).
 3. Распакуйте архив **в корневую папку игры** — туда, где находится `Sailwind.exe`.
 
 ### 3. Запустите игру
@@ -158,7 +158,7 @@ sha256sum sailwind-translator-1.3.3-mono.zip
 ## Quick install
 
 1. **Identify backend**: `Sailwind_Data/Managed/Assembly-CSharp.dll` → Mono; `GameAssembly.dll` → IL2CPP.
-2. **Download** `sailwind-translator-1.3.3-mono.zip` (or `-il2cpp.zip`) from [Releases](https://github.com/ai-pop/sailwind-translator/releases/latest).
+2. **Download** `sailwind-translator-1.3.3-mono.zip` (or `sailwind-translator-1.3.3-il2cpp.zip`) from [Releases](https://github.com/ai-pop/sailwind-translator/releases/latest).
 3. **Extract** into the game folder (next to `Sailwind.exe`).
 4. **Launch** the game. Internet required on first run for online translation.
 5. Press **F3** to open the editor, **F2** to toggle RU ⇄ EN.
