@@ -5,7 +5,7 @@
 **Русификатор игры Sailwind с переводом в реальном времени**
 
 [![Версия](https://img.shields.io/badge/версия-1.3.3-5b9aa0.svg)](https://github.com/ai-pop/sailwind-translator/releases/latest)
-[![Sailwind](https://img.shields.io/badge/Sailwind-0.38-21252b.svg)](https://store.steampowered.com/app/1392950/Sailwind/)
+[![Sailwind](https://img.shields.io/badge/Sailwind-0.38-21252b.svg)](https://store.steampowered.com/app/1764530/Sailwind/)
 [![Unity](https://img.shields.io/badge/Unity-2019.1.10-21252b.svg)](https://unity.com/)
 [![BepInEx](https://img.shields.io/badge/BepInEx-5.4.23-21252b.svg)](https://github.com/BepInEx/BepInEx)
 [![Лицензия](https://img.shields.io/badge/license-MIT-5b9aa0.svg)](LICENSE)
@@ -18,7 +18,7 @@
 
 ## Описание
 
-**Sailwind Translator** — мод для игры [Sailwind](https://store.steampowered.com/app/1392950/Sailwind/), выполняющий локализацию интерфейса и внутриигровых надписей на русский язык. Мод не требует ручного наполнения словаря: незнакомый текст переводится автоматически через онлайн-сервисы с кешированием результата.
+**Sailwind Translator** — мод для игры [Sailwind](https://store.steampowered.com/app/1764530/Sailwind/), выполняющий локализацию интерфейса и внутриигровых надписей на русский язык. Мод не требует ручного наполнения словаря: незнакомый текст переводится автоматически через онлайн-сервисы с кешированием результата.
 
 **Ключевое отличие от классических русификаторов** — перевод работает в реальном времени: при появлении нового текста в сцене он отправляется в фоновый переводчик, результат сохраняется в кеш и применяется «на лету» без перезапуска игры.
 
@@ -301,7 +301,7 @@ MIT License. См. [LICENSE](LICENSE).
 
 # For English speakers
 
-**Sailwind Translator** is a Russian localization mod for the game [Sailwind](https://store.steampowered.com/app/1392950/Sailwind/) with a real-time translation engine.
+**Sailwind Translator** is a Russian localization mod for the game [Sailwind](https://store.steampowered.com/app/1764530/Sailwind/) with a real-time translation engine.
 
 ### What it does
 - Patches `UnityEngine.TextMesh.text` via Harmony to intercept all in-game text.
