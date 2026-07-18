@@ -26,9 +26,11 @@ namespace SailwindTranslator
         public static SceneTranslator Instance;
 
         private static readonly Dictionary<TextMesh, string> _originals = new Dictionary<TextMesh, string>();
+        private static readonly Dictionary<TextMesh, int> _origFontSize = new Dictionary<TextMesh, int>();
 
         private float _timer = 0f;
         private const float INTERVAL = 0.5f;
+        private const float FIT_MIN_SCALE = 0.6f;
 
         private void Start()
         {
@@ -94,12 +96,24 @@ namespace SailwindTranslator
                         if (!_originals.ContainsKey(tm) && !ContainsCyrillic(cur))
                             _originals[tm] = cur;
 
+                        // Форматированные подписи (с табуляциями/escape) — не трогаем,
+                        // перевод ломает вёрстку (literal '/t/t/t' в настройках управления).
+                        if (cur.IndexOf('\t') >= 0 || cur.IndexOf("\\t", System.StringComparison.Ordinal) >= 0)
+                        {
+                            continue;
+                        }
+
                         if (ContainsCyrillic(cur)) continue;
 
                         var ruText = Plugin.Manager?.Get(cur);
                         if (!string.IsNullOrEmpty(ruText) && ruText != cur)
                         {
+                            // Запоминаем оригинальный размер шрифта, чтобы потом подгонять.
+                            if (!_origFontSize.ContainsKey(tm))
+                                _origFontSize[tm] = tm.fontSize;
+
                             tm.text = ruText;
+                            FitFontSize(tm, cur, ruText);
                             applied++;
                         }
                         else
@@ -114,6 +128,9 @@ namespace SailwindTranslator
                         if (_originals.TryGetValue(tm, out var orig) && orig != cur)
                         {
                             tm.text = orig;
+                            // Возвращаем оригинальный размер шрифта.
+                            if (_origFontSize.TryGetValue(tm, out var ofs))
+                                tm.fontSize = ofs;
                             restored++;
                         }
                     }
@@ -133,6 +150,41 @@ namespace SailwindTranslator
             foreach (var c in s)
                 if ((c >= '\u0400' && c <= '\u04FF') || (c >= '\u0500' && c <= '\u052F')) return true;
             return false;
+        }
+
+        /// <summary>Видимая длина самой длинной строки (по строкам, без \n).</summary>
+        private static int VisibleLength(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return 0;
+            int max = 0;
+            foreach (var line in s.Split('\n'))
+            {
+                int len = line.Length;
+                if (len > max) max = len;
+            }
+            return max;
+        }
+
+        /// <summary>
+        /// Подгон размера шрифта под перевод. Английский компактнее русского,
+        /// поэтому перевод часто шире и вылезает за UI. Пропорционально уменьшаем
+        /// fontSize (но не ниже FIT_MIN_SCALE от оригинала).
+        /// </summary>
+        private static void FitFontSize(TextMesh tm, string original, string translated)
+        {
+            if (!_origFontSize.TryGetValue(tm, out int origSize)) return;
+            if (origSize <= 0) return;
+
+            int enLen = VisibleLength(original);
+            int ruLen = VisibleLength(translated);
+            if (enLen <= 0 || ruLen <= 0) { tm.fontSize = origSize; return; }
+
+            if (ruLen <= enLen) { tm.fontSize = origSize; return; }
+
+            float scale = (float)enLen / ruLen;
+            if (scale < FIT_MIN_SCALE) scale = FIT_MIN_SCALE;
+            int newSize = Mathf.Max(1, Mathf.RoundToInt(origSize * scale));
+            tm.fontSize = newSize;
         }
     }
 }

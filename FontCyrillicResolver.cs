@@ -11,14 +11,16 @@ namespace SailwindTranslator
     /// Кириллический шрифт ДЛЯ UnityEngine.TextMesh (НЕ TextMeshPro).
     ///
     /// Sailwind рисует ВЕСЬ текст через UnityEngine.TextMesh (3D-текст).
-    /// Нужен ДИНАМИЧЕСКИЙ UnityEngine.Font с кириллицей: статический (предпечённый
-    /// атлас) при подмене даёт "Font size and style overrides are only supported
-    /// for dynamic fonts" и пустые кнопки. Динамический сам печёт глифы по запросу.
     ///
-    /// Стратегия:
-    ///   0. .ttf/.otf из папки плагина — создаём ДИНАМИЧЕСКИЙ шрифт по имени
-    ///      семейства (читаем имя прямо из TTF).
-    ///   1. Если не вышло — динамический шрифт из системного Arial/Segoe UI.
+    /// ВАЖНОЕ ЗНАНИЕ (ценой двух сломанных релизов):
+    /// У игры СВОЙ шрифт, и в большинстве случаев ОН УЖЕ ПОДДЕРЖИВАЕТ кириллицу
+    /// (он динамический). Подменять его на наш Arsenal НАДО ТОЛЬКО когда текущий
+    /// шрифт реально не рисует кириллицу. Тотальное подменение ломает рендер
+    /// (пустые кнопки, «Font size and style overrides...», исчезновение текста).
+    ///
+    /// Поэтому:
+    ///   - грузим .ttf из папки через new Font(path) (это работало в v1.2.0);
+    ///   - ApplyTo подменяет шрифт ТОЛЬКО если FontHasCyrillic(cur) == false.
     /// </summary>
     public class FontCyrillicResolver
     {
@@ -46,7 +48,8 @@ namespace SailwindTranslator
             {
                 Plugin.Log?.LogWarning(
                     "[FONT] Кириллический шрифт НЕ создан. Положи .ttf/.otf с кириллицей " +
-                    "в BepInEx/plugins/SailwindTranslator/.");
+                    "в BepInEx/plugins/SailwindTranslator/. Текст подменяется только если " +
+                    "у текущего шрифта нет кириллицы — обычно хватает и родного шрифта игры.");
             }
         }
 
@@ -67,20 +70,15 @@ namespace SailwindTranslator
                     string fileName = Path.GetFileName(path);
                     try
                     {
-                        string fontName = ReadFontFamilyName(path) ?? Path.GetFileNameWithoutExtension(path);
-                        Plugin.Log?.LogInfo("[FONT] внутреннее имя шрифта '" + fileName + "': '" + fontName + "'");
-
-                        // Создаём ДИНАМИЧЕСКИЙ шрифт по имени семейства. Это критично:
-                        // new Font(path) даёт статический шрифт (предпечённый атлас), который
-                        // ломает TextMesh (пустые кнопки, warning про dynamic fonts).
-                        Font font = Font.CreateDynamicFontFromOSFont(fontName, 16);
-                        if (font != null)
-                        {
-                            try { font.RequestCharactersInTexture(CYRILLIC_SAMPLE, 32); } catch { }
-                            _cyrFont = font;
-                            Plugin.Log?.LogInfo("[FONT] '" + fileName + "' загружен как ДИНАМИЧЕСКИЙ шрифт. 🎉");
-                            return;
-                        }
+                        // Грузим через new Font(path) — это работало в v1.2.0.
+                        // CreateDynamicFontFromOSFont тут НЕ подходит: он ищет шрифт среди
+                        // установленных в Windows, а Arsenal лежит просто файлом.
+                        var font = new Font(path);
+                        if (font == null) continue;
+                        try { font.RequestCharactersInTexture(CYRILLIC_SAMPLE, 32); } catch { }
+                        _cyrFont = font;
+                        Plugin.Log?.LogInfo("[FONT] '" + fileName + "' принят как запасной кириллический шрифт. 🎉");
+                        return;
                     }
                     catch (Exception ex)
                     {
@@ -92,52 +90,6 @@ namespace SailwindTranslator
             {
                 Plugin.Log?.LogError("[FONT] чтение с диска: " + ex.Message);
             }
-        }
-
-        /// <summary>Читает Family Name (nameID=1) из TTF/OTF таблицы 'name'.</summary>
-        private static string ReadFontFamilyName(string path)
-        {
-            try
-            {
-                byte[] data = File.ReadAllBytes(path);
-                if (data.Length < 12) return null;
-                int numTables = (data[4] << 8) | data[5];
-                int nameOffset = -1;
-                for (int i = 0; i < numTables; i++)
-                {
-                    int rec = 12 + i * 16;
-                    if (rec + 12 > data.Length) break;
-                    string tag = System.Text.Encoding.ASCII.GetString(data, rec, 4);
-                    if (tag == "name")
-                    {
-                        nameOffset = (data[rec + 8] << 24) | (data[rec + 9] << 16) | (data[rec + 10] << 8) | data[rec + 11];
-                        break;
-                    }
-                }
-                if (nameOffset < 0 || nameOffset + 6 > data.Length) return null;
-
-                int count = (data[nameOffset + 2] << 8) | data[nameOffset + 3];
-                int stringOffset = (data[nameOffset + 4] << 8) | data[nameOffset + 5];
-
-                for (int i = 0; i < count; i++)
-                {
-                    int rec = nameOffset + 6 + i * 12;
-                    if (rec + 12 > data.Length) break;
-                    int platformID = (data[rec] << 8) | data[rec + 1];
-                    int nameID = (data[rec + 6] << 8) | data[rec + 7];
-                    int length = (data[rec + 8] << 8) | data[rec + 9];
-                    int offset = (data[rec + 10] << 8) | data[rec + 11];
-                    if (nameID != 1) continue;
-
-                    int strPos = nameOffset + stringOffset + offset;
-                    if (strPos + length > data.Length) continue;
-                    if (platformID == 3)
-                        return System.Text.Encoding.BigEndianUnicode.GetString(data, strPos, length);
-                    return System.Text.Encoding.ASCII.GetString(data, strPos, length);
-                }
-                return null;
-            }
-            catch { return null; }
         }
 
         private void TryCreateFromOs()
@@ -152,7 +104,7 @@ namespace SailwindTranslator
                     if (font == null) continue;
                     try { font.RequestCharactersInTexture(CYRILLIC_SAMPLE, 32); } catch { }
                     _cyrFont = font;
-                    Plugin.Log?.LogInfo("[FONT] создан динамический шрифт из OS:" + name + ". 🎉");
+                    Plugin.Log?.LogInfo("[FONT] создан динамический шрифт из OS:" + name + " (запасной).");
                 }
                 catch (Exception ex)
                 {
@@ -162,17 +114,36 @@ namespace SailwindTranslator
         }
 
         /// <summary>
-        /// Применить кириллический шрифт к TextMesh. Для TextMesh при смене font
-        /// надо ещё перезаписать sharedMaterial у MeshRenderer, иначе текст не
-        /// перерисуется.
+        /// Проверяет, рисует ли шрифт кириллицу. Для динамического шрифта это
+        /// надёжно (глифы пекутся по запросу и сообщаются корректно).
+        /// </summary>
+        private static bool FontHasCyrillic(Font f)
+        {
+            if (f == null) return false;
+            try
+            {
+                f.RequestCharactersInTexture("Ая0", 32);
+                CharacterInfo info;
+                return f.GetCharacterInfo('А', out info, 32) &&
+                       f.GetCharacterInfo('я', out info, 32);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Подменяем шрифт ТОЛЬКО если текущий НЕ рисует кириллицу.
+        /// Тотальное подменение ломает рендер (пустые кнопки/исчезновение текста).
         /// </summary>
         public void ApplyTo(TextMesh target)
         {
             if (target == null || _cyrFont == null) return;
             try
             {
-                if (target.font != _cyrFont)
-                    target.font = _cyrFont;
+                var cur = target.font;
+                bool needsSwap = cur == null || !FontHasCyrillic(cur);
+                if (!needsSwap) return;
+
+                target.font = _cyrFont;
                 try { target.GetComponent<Renderer>().sharedMaterial = _cyrMaterial; } catch { }
                 try { _cyrFont.RequestCharactersInTexture(CYRILLIC_SAMPLE, target.fontSize); } catch { }
             }

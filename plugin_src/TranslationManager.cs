@@ -195,14 +195,19 @@ namespace SailwindTranslator
                         _dict = SimpleJson.Parse(text);
 
                         // Очистка от мусора, накопившегося от старых версий плагина:
-                        // записи с hex-хвостом (tracking-ID Google) или пустые значения.
+                        // - записи с hex-хвостом (tracking-ID Google) или пустые значения;
+                        // - записи, чей ключ содержит табуляции/escape (форматированные подписи
+                        //   настроек управления — перевод ломал их в literal '/t/t/t').
                         int before = _dict.Count;
                         var keys = _dict.Keys.ToList();
                         foreach (var k in keys)
                         {
                             var v = _dict[k];
-                            if (v == null || v.Length == 0 ||
-                                System.Text.RegularExpressions.Regex.IsMatch(v, "[0-9a-fA-F]{16,}"))
+                            bool bad = false;
+                            if (v == null || v.Length == 0) bad = true;
+                            else if (System.Text.RegularExpressions.Regex.IsMatch(v, "[0-9a-fA-F]{16,}")) bad = true;
+                            else if (k != null && (k.IndexOf('\t') >= 0 || k.IndexOf("\\t", System.StringComparison.Ordinal) >= 0)) bad = true;
+                            if (bad)
                             {
                                 _dict.Remove(k);
                                 Plugin.Log?.LogInfo("[CLEAN] удалён мусорный перевод: '" + (k.Length <= 40 ? k : k.Substring(0, 40) + "…") + "'");
