@@ -131,8 +131,9 @@ namespace SailwindTranslator
         }
 
         /// <summary>
-        /// Подменяем шрифт ТОЛЬКО если текущий НЕ рисует кириллицу.
-        /// Тотальное подменение ломает рендер (пустые кнопки/исчезновение текста).
+        /// Подменяем шрифт:
+        /// - если пользователь явно выбрал шрифт в UI (ForcedExternal) — ВСЕГДА;
+        /// - иначе только если текущий НЕ рисует кириллицу (рабочая логика v1.2.0).
         /// </summary>
         public void ApplyTo(TextMesh target)
         {
@@ -140,7 +141,9 @@ namespace SailwindTranslator
             try
             {
                 var cur = target.font;
-                bool needsSwap = cur == null || !FontHasCyrillic(cur);
+                if (cur == _cyrFont) return;
+
+                bool needsSwap = _forcedExternal || cur == null || !FontHasCyrillic(cur);
                 if (!needsSwap) return;
 
                 target.font = _cyrFont;
@@ -156,6 +159,83 @@ namespace SailwindTranslator
         public void ApplyTo(UnityEngine.UI.Text target)
         {
             // UI.Text в игре нет (0 экземпляров).
+        }
+
+        /// <summary>
+        /// Hot-reload: заменить активный шрифт на новый (вызывается из UI при выборе).
+        /// Сразу переприменяется ко всем TextMesh при следующем проходе сканера.
+        /// </summary>
+        public void ReplaceFont(Font newFont)
+        {
+            if (newFont == null) return;
+            _cyrFont = newFont;
+            try { _cyrFont.RequestCharactersInTexture(CYRILLIC_SAMPLE, 32); } catch { }
+            _cyrMaterial = _cyrFont.material;
+            _forcedExternal = true; // пользователь явно выбрал шрифт — применяем ко всему
+            Plugin.Log?.LogInfo("[FONT] шрифт заменён на '" + newFont.name + "' (принудительно).");
+        }
+
+        /// <summary>
+        /// True, если пользователь явно выбрал шрифт через UI (FontManager.Apply).
+        /// В этом режиме ApplyTo подменяет ВСЕ TextMesh, а не только без-кирилличные.
+        /// </summary>
+        public bool ForcedExternal => _forcedExternal;
+        private bool _forcedExternal;
+
+        /// <summary>
+        /// Вернуть динамический Font для UI мода (OnGUI). Загружается из того же
+        /// файла, что игровой, но как динамический (IMGUI требует динамический шрифт).
+        /// Если включён отдельный UI-шрифт — грузится он.
+        /// </summary>
+        public Font GetFontForUi()
+        {
+            try
+            {
+                // Приоритет: отдельный UI-шрифт (CfgUiFont), иначе тот же что игровой.
+                string uiFontId = Plugin.CfgUiFont != null ? Plugin.CfgUiFont.Value : "";
+                if (!string.IsNullOrEmpty(uiFontId))
+                {
+                    Font f = LoadFontForUi(uiFontId);
+                    if (f != null) return f;
+                }
+                // Иначе — клон игрового шрифта как динамический.
+                if (_cyrFont != null)
+                {
+                    // Имя семейства — берём из имени загруженного Font.
+                    string name = _cyrFont.name;
+                    var dyn = Font.CreateDynamicFontFromOSFont(name, 14);
+                    if (dyn != null) return dyn;
+                }
+                return Font.CreateDynamicFontFromOSFont("Arial", 14);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Font LoadFontForUi(string id)
+        {
+            try
+            {
+                if (id.StartsWith("os:"))
+                {
+                    return Font.CreateDynamicFontFromOSFont(id.Substring(3), 14);
+                }
+                if (id.StartsWith("disk:"))
+                {
+                    string dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                    string path = Path.Combine(dir, id.Substring(5));
+                    if (File.Exists(path))
+                    {
+                        // Для UI — создаём динамический по имени (если оно установлено),
+                        // иначе грузим как есть (IMGUI переживёт и статический, но не идеально).
+                        return new Font(path);
+                    }
+                }
+                return null;
+            }
+            catch { return null; }
         }
 
         private const string CYRILLIC_SAMPLE =
