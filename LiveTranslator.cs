@@ -8,15 +8,15 @@ using System.Threading;
 namespace SailwindTranslator
 {
     /// <summary>
-    /// Живой переводчик: переводит ЛЮБОЙ английский текст в реальном времени
-    /// и кеширует результат в translations.json.
+    /// Живой переводчик: переводит английский текст в реальном времени и кеширует
+    /// результат в translations.json.
     ///
-    /// Провайдеры (по приоритету):
-    ///   1. Google Translate (endpoint gtx, без ключа, без жёстких лимитов) — быстрый.
-    ///   2. MyMemory (бесплатный, без ключа) — фоллбэк.
+    /// Провайдеры: Google Translate (gtx, без ключа, быстро) -> MyMemory (фоллбэк).
+    /// Несколько фоновых потоков для скорости.
     ///
-    /// Несколько фоновых потоков для скорости. Главный поток только ставит строки
-    /// в очередь и читает готовый результат из словаря.
+    /// ВАЖНО: технический текст (коды клавиш, одиночные символы, чистые числа,
+    /// строки без латиницы) НЕ переводится — иначе получается 'F1'->'Ф1',
+    /// 'W'->'Вт', 'Tab'->'Вкладка', мусор.
     /// </summary>
     public static class LiveTranslator
     {
@@ -28,7 +28,6 @@ namespace SailwindTranslator
         private static volatile bool _running;
         private static DateTime _lastSave = DateTime.MinValue;
 
-        /// <summary>Главный поток опрашивает это поле: true = пришли новые переводы, надо пересканировать.</summary>
         public static volatile bool NeedsRescan;
 
         public static void Start()
@@ -45,7 +44,7 @@ namespace SailwindTranslator
                 _threads.Add(t);
                 t.Start();
             }
-            Plugin.Log?.LogInfo("[LIVE] фоновый переводчик запущен: " + workers + " поток(ов), Google+MyMemory.");
+            Plugin.Log?.LogInfo("[LIVE] фоновый переводчик запущен: " + workers + " поток(ов).");
         }
 
         public static void Stop()
@@ -61,14 +60,68 @@ namespace SailwindTranslator
             if (ContainsCyrillic(english)) return;
             if (english.Length > 500) return;
 
+            if (ShouldSkip(english)) return;
+
             lock (_lock)
             {
                 if (_queued.Contains(english) || _inProgress.Contains(english)) return;
-                if (_failed.Contains(english)) return; // уже пробовали — не получилось
+                if (_failed.Contains(english)) return;
                 if (Plugin.Manager != null && Plugin.Manager.Has(english)) return;
                 _queued.Add(english);
                 Monitor.PulseAll(_lock);
             }
+        }
+
+        /// <summary>
+        /// Пропустить «технический» текст, который нельзя осмысленно перевести
+        /// и который даёт мусор вроде 'F1'->'Ф1', 'W'->'Вт', 'Tab'->'Вкладка'.
+        /// </summary>
+        private static bool ShouldSkip(string s)
+        {
+            string t = s.Trim();
+            if (t.Length == 0) return true;
+            if (t.Length <= 2) return true; // одиночные символы/клавиши: W, A, S, D, F1...
+
+            // Чистые числа/дроби/даты.
+            bool allDigits = true;
+            foreach (var c in t)
+            {
+                if (!char.IsDigit(c) && c != '.' && c != ',' && c != ' ' && c != ':' && c != '/') { allDigits = false; break; }
+            }
+            if (allDigits) return true;
+
+            if (IsKeyCode(t)) return true;
+
+            // Нет ни одной латинской буквы — переводить нечего.
+            bool hasLetter = false;
+            foreach (var c in t)
+            {
+                if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) { hasLetter = true; break; }
+            }
+            if (!hasLetter) return true;
+
+            return false;
+        }
+
+        private static bool IsKeyCode(string s)
+        {
+            switch (s)
+            {
+                case "Space": case "Tab": case "CapsLock":
+                case "LeftShift": case "RightShift":
+                case "LeftControl": case "RightControl":
+                case "LeftAlt": case "RightAlt":
+                case "UpArrow": case "DownArrow": case "LeftArrow": case "RightArrow":
+                case "Return": case "Escape": case "Backspace": case "Delete": case "Insert":
+                case "Home": case "End": case "PageUp": case "PageDown":
+                case "KeypadEnter": case "Numlock":
+                    return true;
+            }
+            if (s.Length >= 2 && s[0] == 'F' && char.IsDigit(s[1])) return true;            // F1..F15
+            if (s.StartsWith("Alpha", StringComparison.Ordinal) && s.Length > 5) return true;  // Alpha0..9
+            if (s.StartsWith("Keypad", StringComparison.Ordinal) && s.Length > 6) return true; // Keypad0..9
+            if (s.StartsWith("Joystick", StringComparison.Ordinal)) return true;
+            return false;
         }
 
         private static void Worker()
@@ -88,7 +141,7 @@ namespace SailwindTranslator
 
                 string ru = null;
                 try { ru = TranslateGoogle(item); }
-                catch (Exception ex) { Plugin.Log?.LogWarning("[LIVE] Google не ответил для '" + Trunc(item) + "': " + ex.Message); }
+                catch (Exception ex) { Plugin.Log?.LogWarning("[LIVE] Google не ответил: " + ex.Message); }
 
                 if (string.IsNullOrEmpty(ru) || ru == item)
                 {
@@ -96,7 +149,10 @@ namespace SailwindTranslator
                     catch (Exception ex) { Plugin.Log?.LogWarning("[LIVE] MyMemory не ответил: " + ex.Message); }
                 }
 
-                if (!string.IsNullOrEmpty(ru) && ru != item)
+                // Финальная очистка: убрать хеши/tracking-ID, которые Google иногда дописывает.
+                ru = Cleanup(ru);
+
+                if (!string.IsNullOrEmpty(ru) && ru != item && !IsGarbage(ru))
                 {
                     Plugin.Manager?.Set(item, ru);
                     NeedsRescan = true;
@@ -113,11 +169,36 @@ namespace SailwindTranslator
                 }
 
                 lock (_lock) _inProgress.Remove(item);
-                Thread.Sleep(80); // лёгкая пауза между запросами
+                Thread.Sleep(80);
             }
         }
 
-        // Google Translate (неофициальный endpoint gtx). Без ключа. Быстро.
+        /// <summary>
+        /// Убирает мусор из перевода: длинные hex-строки (tracking-ID Google вида
+        /// '8e6adaf1f9ae06bcb9663531e5521abb'), который прицеплялся в конец.
+        /// </summary>
+        private static string Cleanup(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            // Срезаем любой хвост, начинающийся с длинной hex-строки (>=16 hex-символов подряд).
+            s = Regex.Replace(s, "[0-9a-fA-F]{16,}.*$", "", RegexOptions.Singleline);
+            return s.Trim();
+        }
+
+        /// <summary>true, если результат выглядит как мусор (цифры+хеш и т.п.).</summary>
+        private static bool IsGarbage(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return true;
+            // Если после очистки остались только hex-символы и пробелы — мусор.
+            bool allHex = true;
+            foreach (var c in s)
+            {
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || char.IsWhiteSpace(c)))
+                { allHex = false; break; }
+            }
+            return allHex;
+        }
+
         private static string TranslateGoogle(string en)
         {
             string url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ru&dt=t&q=" + Uri.EscapeDataString(en);
@@ -125,11 +206,11 @@ namespace SailwindTranslator
             {
                 wc.Headers[HttpRequestHeader.UserAgent] = "Mozilla/5.0";
                 string json = wc.DownloadString(url);
-                // Ответ: [[["перевод","оригинал",...],...],...]
                 var sb = new StringBuilder();
-                var matches = Regex.Matches(json, @"\[\[""(.*?)"",""(.*?)""");
+                // Формат: [[["перевод","оригинал",...],...],...]
+                var matches = Regex.Matches(json, @"\[\[""(?<tr>(?:[^""\\]|\\.)*)"",""(?<src>(?:[^""\\]|\\.)*)""");
                 foreach (Match m in matches)
-                    sb.Append(Unescape(m.Groups[1].Value));
+                    sb.Append(Unescape(m.Groups["tr"].Value));
                 return sb.Length == 0 ? null : sb.ToString();
             }
         }

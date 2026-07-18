@@ -10,15 +10,15 @@ namespace SailwindTranslator
     /// <summary>
     /// Кириллический шрифт ДЛЯ UnityEngine.TextMesh (НЕ TextMeshPro).
     ///
-    /// Открытие из декомпиляции Assembly-CSharp.dll: Sailwind рисует ВЕСЬ текст
-    /// через UnityEngine.TextMesh (3D-текст). TextMeshPro и UnityEngine.UI.Text
-    /// в сцене отсутствуют (сканер показал 0/0). Поэтому:
-    ///   - нужен обычный UnityEngine.Font с кириллицей;
-    ///   - материал этого шрифта надо ставить на MeshRenderer компонента TextMesh.
+    /// Sailwind рисует ВЕСЬ текст через UnityEngine.TextMesh (3D-текст).
+    /// Нужен ДИНАМИЧЕСКИЙ UnityEngine.Font с кириллицей: статический (предпечённый
+    /// атлас) при подмене даёт "Font size and style overrides are only supported
+    /// for dynamic fonts" и пустые кнопки. Динамический сам печёт глифы по запросу.
     ///
-    /// Источники кириллического шрифта (по приоритету):
-    ///   0. .ttf/.otf из папки плагина.
-    ///   1. Динамический шрифт из системного (Arial, Segoe UI, ...).
+    /// Стратегия:
+    ///   0. .ttf/.otf из папки плагина — создаём ДИНАМИЧЕСКИЙ шрифт по имени
+    ///      семейства (читаем имя прямо из TTF).
+    ///   1. Если не вышло — динамический шрифт из системного Arial/Segoe UI.
     /// </summary>
     public class FontCyrillicResolver
     {
@@ -40,14 +40,13 @@ namespace SailwindTranslator
             {
                 try { _cyrFont.RequestCharactersInTexture(CYRILLIC_SAMPLE, 32); } catch { }
                 _cyrMaterial = _cyrFont.material;
-                Plugin.Log?.LogInfo($"[FONT] кириллический шрифт готов: '{_cyrFont.name}'. " +
-                                    $"(для TextMesh: font + material установятся на компоненты)");
+                Plugin.Log?.LogInfo("[FONT] кириллический шрифт готов: '" + _cyrFont.name + "'.");
             }
             else
             {
                 Plugin.Log?.LogWarning(
                     "[FONT] Кириллический шрифт НЕ создан. Положи .ttf/.otf с кириллицей " +
-                    "в BepInEx/plugins/SailwindTranslator/. Русский будет квадратиками.");
+                    "в BepInEx/plugins/SailwindTranslator/.");
             }
         }
 
@@ -61,35 +60,84 @@ namespace SailwindTranslator
                     .Where(p => p.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) ||
                                 p.EndsWith(".otf", StringComparison.OrdinalIgnoreCase))
                     .ToList();
-                Plugin.Log?.LogInfo($"[FONT] файлов шрифтов в папке плагина: {files.Count}");
+                Plugin.Log?.LogInfo("[FONT] файлов шрифтов в папке плагина: " + files.Count);
+
                 foreach (var path in files)
                 {
-                    string name = Path.GetFileName(path);
+                    string fileName = Path.GetFileName(path);
                     try
                     {
-                        var font = new Font(path);
-                        if (font == null) continue;
-                        // ВАЖНО: НЕ отвергаем шрифт по GetCharacterInfo! Для свежесозданного
-                        // динамического шрифта текстура глифов перестраивается асинхронно, и
-                        // GetCharacterInfo('А') в первом кадре ложно возвращает false даже для
-                        // полностью кириллического шрифта (например Arsenal). Шрифт в папке =
-                        // осознанный выбор пользователя — используем как есть. TextMesh сам
-                        // запросит нужные глифы при рендере.
-                        try { font.RequestCharactersInTexture(CYRILLIC_SAMPLE, 32); } catch { }
-                        _cyrFont = font;
-                        Plugin.Log?.LogInfo($"[FONT] '{name}' принят как шрифт перевода (детекцию кириллицы отключил — она давала ложные срабатывания). 🎉");
-                        return;
+                        string fontName = ReadFontFamilyName(path) ?? Path.GetFileNameWithoutExtension(path);
+                        Plugin.Log?.LogInfo("[FONT] внутреннее имя шрифта '" + fileName + "': '" + fontName + "'");
+
+                        // Создаём ДИНАМИЧЕСКИЙ шрифт по имени семейства. Это критично:
+                        // new Font(path) даёт статический шрифт (предпечённый атлас), который
+                        // ломает TextMesh (пустые кнопки, warning про dynamic fonts).
+                        Font font = Font.CreateDynamicFontFromOSFont(fontName, 16);
+                        if (font != null)
+                        {
+                            try { font.RequestCharactersInTexture(CYRILLIC_SAMPLE, 32); } catch { }
+                            _cyrFont = font;
+                            Plugin.Log?.LogInfo("[FONT] '" + fileName + "' загружен как ДИНАМИЧЕСКИЙ шрифт. 🎉");
+                            return;
+                        }
                     }
                     catch (Exception ex)
                     {
-                        Plugin.Log?.LogWarning($"[FONT] '{name}' не загрузился: {ex.Message}");
+                        Plugin.Log?.LogWarning("[FONT] '" + fileName + "' не загрузился: " + ex.Message);
                     }
                 }
             }
             catch (Exception ex)
             {
-                Plugin.Log?.LogError($"[FONT] чтение с диска: {ex.Message}");
+                Plugin.Log?.LogError("[FONT] чтение с диска: " + ex.Message);
             }
+        }
+
+        /// <summary>Читает Family Name (nameID=1) из TTF/OTF таблицы 'name'.</summary>
+        private static string ReadFontFamilyName(string path)
+        {
+            try
+            {
+                byte[] data = File.ReadAllBytes(path);
+                if (data.Length < 12) return null;
+                int numTables = (data[4] << 8) | data[5];
+                int nameOffset = -1;
+                for (int i = 0; i < numTables; i++)
+                {
+                    int rec = 12 + i * 16;
+                    if (rec + 12 > data.Length) break;
+                    string tag = System.Text.Encoding.ASCII.GetString(data, rec, 4);
+                    if (tag == "name")
+                    {
+                        nameOffset = (data[rec + 8] << 24) | (data[rec + 9] << 16) | (data[rec + 10] << 8) | data[rec + 11];
+                        break;
+                    }
+                }
+                if (nameOffset < 0 || nameOffset + 6 > data.Length) return null;
+
+                int count = (data[nameOffset + 2] << 8) | data[nameOffset + 3];
+                int stringOffset = (data[nameOffset + 4] << 8) | data[nameOffset + 5];
+
+                for (int i = 0; i < count; i++)
+                {
+                    int rec = nameOffset + 6 + i * 12;
+                    if (rec + 12 > data.Length) break;
+                    int platformID = (data[rec] << 8) | data[rec + 1];
+                    int nameID = (data[rec + 6] << 8) | data[rec + 7];
+                    int length = (data[rec + 8] << 8) | data[rec + 9];
+                    int offset = (data[rec + 10] << 8) | data[rec + 11];
+                    if (nameID != 1) continue;
+
+                    int strPos = nameOffset + stringOffset + offset;
+                    if (strPos + length > data.Length) continue;
+                    if (platformID == 3)
+                        return System.Text.Encoding.BigEndianUnicode.GetString(data, strPos, length);
+                    return System.Text.Encoding.ASCII.GetString(data, strPos, length);
+                }
+                return null;
+            }
+            catch { return null; }
         }
 
         private void TryCreateFromOs()
@@ -103,50 +151,26 @@ namespace SailwindTranslator
                     var font = Font.CreateDynamicFontFromOSFont(name, 16);
                     if (font == null) continue;
                     try { font.RequestCharactersInTexture(CYRILLIC_SAMPLE, 32); } catch { }
-                    if (FontHasCyrillic(font))
-                    {
-                        _cyrFont = font;
-                        Plugin.Log?.LogInfo($"[FONT] создан динамический кириллический шрифт из OS:{name}. 🎉");
-                    }
-                    else
-                    {
-                        Plugin.Log?.LogInfo($"[FONT] OS:{name} не дал кириллицу.");
-                    }
+                    _cyrFont = font;
+                    Plugin.Log?.LogInfo("[FONT] создан динамический шрифт из OS:" + name + ". 🎉");
                 }
                 catch (Exception ex)
                 {
-                    Plugin.Log?.LogWarning($"[FONT] OS:{name}: {ex.Message}");
+                    Plugin.Log?.LogWarning("[FONT] OS:" + name + ": " + ex.Message);
                 }
             }
         }
 
-        private static bool FontHasCyrillic(Font f)
-        {
-            if (f == null) return false;
-            try
-            {
-                f.RequestCharactersInTexture("Ая0", 32);
-                CharacterInfo info;
-                return f.GetCharacterInfo('А', out info, 32) &&
-                       f.GetCharacterInfo('я', out info, 32);
-            }
-            catch { return false; }
-        }
-
         /// <summary>
-        /// Применить кириллический шрифт к TextMesh. Важно: для TextMesh при смене
-        /// font надо ещё перезаписать sharedMaterial у MeshRenderer, иначе текст
-        /// не перерисуется.
+        /// Применить кириллический шрифт к TextMesh. Для TextMesh при смене font
+        /// надо ещё перезаписать sharedMaterial у MeshRenderer, иначе текст не
+        /// перерисуется.
         /// </summary>
         public void ApplyTo(TextMesh target)
         {
             if (target == null || _cyrFont == null) return;
             try
             {
-                // ВАЖНО: всегда подменяем шрифт на выбранный пользователем, без
-                // "умной" проверки FontHasCyrillic на текущем шрифте — она ложно
-                // срабатывала, и выбранный .ttf не применялся. Пользователь положил
-                // шрифт в папку = хочет именно его.
                 if (target.font != _cyrFont)
                     target.font = _cyrFont;
                 try { target.GetComponent<Renderer>().sharedMaterial = _cyrMaterial; } catch { }
@@ -158,10 +182,9 @@ namespace SailwindTranslator
             }
         }
 
-        // Совместимость: старый UI.Text-путь (если где-то всё же попадётся).
         public void ApplyTo(UnityEngine.UI.Text target)
         {
-            // UI.Text не используется в игре (0 экземпляров), пропускаем.
+            // UI.Text в игре нет (0 экземпляров).
         }
 
         private const string CYRILLIC_SAMPLE =

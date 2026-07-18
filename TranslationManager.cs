@@ -193,6 +193,27 @@ namespace SailwindTranslator
                     {
                         var text = File.ReadAllText(TranslationsPath, Encoding.UTF8);
                         _dict = SimpleJson.Parse(text);
+
+                        // Очистка от мусора, накопившегося от старых версий плагина:
+                        // записи с hex-хвостом (tracking-ID Google) или пустые значения.
+                        int before = _dict.Count;
+                        var keys = _dict.Keys.ToList();
+                        foreach (var k in keys)
+                        {
+                            var v = _dict[k];
+                            if (v == null || v.Length == 0 ||
+                                System.Text.RegularExpressions.Regex.IsMatch(v, "[0-9a-fA-F]{16,}"))
+                            {
+                                _dict.Remove(k);
+                                Plugin.Log?.LogInfo("[CLEAN] удалён мусорный перевод: '" + (k.Length <= 40 ? k : k.Substring(0, 40) + "…") + "'");
+                            }
+                        }
+                        if (_dict.Count != before)
+                        {
+                            Plugin.Log?.LogInfo("[CLEAN] удалено " + (before - _dict.Count) + " мусорных переводов. Сохраняю очищенный словарь.");
+                            Save();
+                        }
+
                         _lastWrite = File.GetLastWriteTime(TranslationsPath);
                         Plugin.Log.LogInfo($"Загружено {_dict.Count} переводов из {TranslationsPath}");
                     }
