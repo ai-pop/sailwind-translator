@@ -5,10 +5,14 @@ namespace SailwindTranslator
 {
     /// <summary>
     /// Окно редактора перевода (IMGUI).
-    /// Нажми E в игре чтобы открыть/закрыть.
+    /// Нажми F3 в игре чтобы открыть/закрыть.
     ///
-    /// ВАЖНО: нажатие E ловится в OnGUI() через Event.current.
+    /// ВАЖНО: нажатие F3 ловится в OnGUI() через Event.current.
     /// В Update() это не работает (Event.current там всегда null).
+    ///
+    /// ВАЖНО: E намеренно НЕ используется — в Sailwind это кнопка
+    /// взаимодействия (открыть дверь, взять предмет и т.п.),
+    /// поэтому редактор вынесен на F3, чтобы не конфликтовать с геймплеем.
     /// </summary>
     public class EditorMenu : MonoBehaviour
     {
@@ -19,9 +23,9 @@ namespace SailwindTranslator
         private string _newKey = "";
         private string _newValue = "";
 
-        // Cooldown, чтобы одно нажатие E не сработало дважды (Layout/KeyDown)
-        private float _lastETime = 0f;
-        private const float E_COOLDOWN = 0.3f;
+        // Cooldown, чтобы одно нажатие F3 не сработало дважды (Layout/KeyDown)
+        private float _lastF3Time = 0f;
+        private const float F3_COOLDOWN = 0.3f;
 
         // Кэш для отображения
         private List<KeyValuePair<string, string>> _rows = new List<KeyValuePair<string, string>>();
@@ -29,16 +33,16 @@ namespace SailwindTranslator
         private void OnGUI()
         {
             var e = Event.current;
-            if (e != null && e.type == EventType.KeyDown && e.keyCode == KeyCode.E
-                && Time.realtimeSinceStartup - _lastETime > E_COOLDOWN)
+            if (e != null && e.type == EventType.KeyDown && e.keyCode == KeyCode.F3
+                && Time.realtimeSinceStartup - _lastF3Time > F3_COOLDOWN)
             {
                 _visible = !_visible;
-                _lastETime = Time.realtimeSinceStartup;
+                _lastF3Time = Time.realtimeSinceStartup;
                 if (_visible) Refresh();
             }
 
             if (!_visible) return;
-            _window = GUI.Window(987654, _window, DrawWindow, "Sailwind Translator Editor — Press E to close");
+            _window = GUI.Window(987654, _window, DrawWindow, "Sailwind Translator Editor — Press F3 to close");
         }
 
         private void DrawWindow(int id)
@@ -114,7 +118,7 @@ namespace SailwindTranslator
             GUILayout.EndHorizontal();
 
             // Подсказки
-            GUILayout.Label("Press E to toggle menu. Changes apply instantly. Click Save to write to disk.",
+            GUILayout.Label("Press F3 to toggle menu. Changes apply instantly. Click Save to write to disk.",
                 GUI.skin.box);
 
             GUILayout.EndVertical();

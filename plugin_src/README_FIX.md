@@ -30,21 +30,24 @@ FileNotFoundException: Could not load file or assembly 'UnityEngine.InputLegacyM
 - Удалён мёртвый код (`EditorMenu.Update`, неиспользуемые поля
   `_lastEnglish`/`_dummy` в `TextPatcher`).
 - Убран устаревший `Application.RegisterLogCallback`.
-- Документация хоткеев приведена к коду (E + F2).
+- Документация хоткеев приведена к коду (F3 + F2).
 
 ## Управление
 
 | Клавиша | Действие |
 |---------|----------|
-| **E**  | Открыть/закрыть редактор перевода |
+| **F3** | Открыть/закрыть редактор перевода |
 | **F2** | Переключить язык RU/EN |
+
+> Примечание: редактор вынесен на **F3**, а не на `E` — в Sailwind клавиша
+> `E` используется для взаимодействия с предметами/дверями.
 
 ## Установка
 
 1. Узнай билд игры (Mono/IL2CPP) — см. `INSTALL_RU.txt`.
 2. Скопируй содержимое `install_mono/` (рекомендуется) или
    `install_il2cpp/` в папку с игрой.
-3. Запусти игру. В меню нажми **E** — откроется редактор.
+3. Запусти игру. В меню нажми **F3** — откроется редактор.
 
 ## Сборка
 
@@ -65,7 +68,7 @@ plugin_src/
 ├── Plugin.cs                   # Точка входа (BepInPlugin)
 ├── TextPatcher.cs              # Harmony-патчи для TMP_Text / UI.Text
 ├── TranslationManager.cs       # Менеджер переводов + JSON + hot-reload
-├── EditorMenu.cs               # IMGUI редактор (E)   — OnGUI()
+├── EditorMenu.cs               # IMGUI редактор (F3)  — OnGUI()
 ├── LangToggle.cs               # Переключатель языка (F2) — OnGUI()
 ├── FontAutoFit.cs              # Автоподгон шрифта
 ├── FontCyrillicResolver.cs     # Кириллические шрифты

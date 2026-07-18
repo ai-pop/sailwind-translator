@@ -55,7 +55,7 @@ namespace SailwindTranslator
             gameObject.AddComponent<LangToggle>();
             gameObject.AddComponent<FontAutoFit>();
 
-            Log.LogInfo($"{NAME} v{VERSION} loaded. E=editor, F2=toggle EN/RU.");
+            Log.LogInfo($"{NAME} v{VERSION} loaded. F3=editor, F2=toggle EN/RU.");
         }
 
         private void OnDestroy()

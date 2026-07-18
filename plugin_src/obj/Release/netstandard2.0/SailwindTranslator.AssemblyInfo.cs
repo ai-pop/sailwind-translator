@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SailwindTranslator")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.1.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.1.0+d1319964976dc8dd0ccf70e256e63c4c80fb4293")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.1.0+29eb8e1466ca8e66a0af5425cc24d65baebe9a6a")]
 [assembly: System.Reflection.AssemblyProductAttribute("SailwindTranslator")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SailwindTranslator")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.1.0.0")]
