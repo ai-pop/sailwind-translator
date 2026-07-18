@@ -1,0 +1,11 @@
+/home/z/my-project/download/sailwind-rus-bundle/plugin_src/bin/Release/netstandard2.0/translations_template.json
+/home/z/my-project/download/sailwind-rus-bundle/plugin_src/bin/Release/netstandard2.0/SailwindTranslator.deps.json
+/home/z/my-project/download/sailwind-rus-bundle/plugin_src/bin/Release/netstandard2.0/SailwindTranslator.dll
+/home/z/my-project/download/sailwind-rus-bundle/plugin_src/bin/Release/netstandard2.0/SailwindTranslator.pdb
+/home/z/my-project/download/sailwind-rus-bundle/plugin_src/obj/Release/netstandard2.0/SailwindTranslator.csproj.AssemblyReference.cache
+/home/z/my-project/download/sailwind-rus-bundle/plugin_src/obj/Release/netstandard2.0/SailwindTranslator.GeneratedMSBuildEditorConfig.editorconfig
+/home/z/my-project/download/sailwind-rus-bundle/plugin_src/obj/Release/netstandard2.0/SailwindTranslator.AssemblyInfoInputs.cache
+/home/z/my-project/download/sailwind-rus-bundle/plugin_src/obj/Release/netstandard2.0/SailwindTranslator.AssemblyInfo.cs
+/home/z/my-project/download/sailwind-rus-bundle/plugin_src/obj/Release/netstandard2.0/SailwindTranslator.csproj.CoreCompileInputs.cache
+/home/z/my-project/download/sailwind-rus-bundle/plugin_src/obj/Release/netstandard2.0/SailwindTranslator.dll
+/home/z/my-project/download/sailwind-rus-bundle/plugin_src/obj/Release/netstandard2.0/SailwindTranslator.pdb

@@ -1,0 +1,5 @@
+is_global = true
+build_property.RootNamespace = SailwindTranslator
+build_property.ProjectDir = /home/z/my-project/download/sailwind-rus-bundle/plugin_src/
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 

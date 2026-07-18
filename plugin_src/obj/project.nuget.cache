@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "FRKdlplhL9w=",
+  "success": true,
+  "projectFilePath": "/home/z/my-project/download/sailwind-rus-bundle/plugin_src/SailwindTranslator.csproj",
+  "expectedPackageFiles": [
+    "/home/z/.nuget/packages/microsoft.netcore.platforms/1.1.0/microsoft.netcore.platforms.1.1.0.nupkg.sha512",
+    "/home/z/.nuget/packages/netstandard.library/2.0.3/netstandard.library.2.0.3.nupkg.sha512"
+  ],
+  "logs": []
+}
