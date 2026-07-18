@@ -6,30 +6,26 @@ using UnityEngine;
 namespace SailwindTranslator
 {
     /// <summary>
-    /// UI мода: тёмный минимализм, вкладки, ЖЁСТКАЯ изоляция ввода (Harmony),
+    /// UI мода: тёмный минимализм, вкладки, жёсткая изоляция ввода,
     /// выбор шрифта, переназначение клавиш, ПЕРЕТАСКИВАНИЕ и RESIZE окна.
     ///
-    /// Архитектура окна:
-    /// - Шапка (titlebar) рисуется через GUI (Rect) — в ней DragWindow, потому что
-    ///   GUILayout ломает перетаскивание (перехватывает события мыши).
-    /// - Контент под шапкой — через GUILayout.BeginArea(Rect) + нормальный layout.
-    /// - Правый нижний угол — ручка resize (18x18), тянем мышью.
+    /// Архитектура окна (v1.3.3): чёткие НЕпересекающиеся регионы.
+    ///   Шапка        [0 .. titlebarH]               — вкладки + drag
+    ///   Контент      [titlebarH+1 .. H-footerH-1]   — flexible, в GUI.BeginGroup (клиппинг)
+    ///   Футер        [H-footerH .. H]               — слева до W-gripCol
+    ///   Resize-ручка [W-gripSize-pad .. W] в углу   — отдельный регион
     /// </summary>
     public class ModUI : MonoBehaviour
     {
         public static ModUI Instance { get; private set; }
 
         private bool _visible;
-        private Rect _window = new Rect(80, 80, 820, 600);
-        private Vector2 _scroll = Vector2.zero;
+        private Rect _window = new Rect(80, 80, 820, 620);
         private GUISkin _skin;
         private Font _uiFont;
 
-        private const float TitlebarH = 30f;
-        private const float ResizeHandle = 18f;
-        private const float MinW = 520f;
-        private const float MinH = 360f;
-        private bool _resizing;
+        // Отдельный скролл на каждую вкладку.
+        private Vector2 _scrollTrans, _scrollSettings, _scrollFonts, _scrollControls;
 
         private enum Tab { Translations, Settings, Fonts, Controls }
         private Tab _tab = Tab.Translations;
@@ -42,11 +38,11 @@ namespace SailwindTranslator
         private string _rebindingAction = null;
 
         private FontManager _fonts;
-        private Vector2 _fontScroll;
         private float _fontScanTimer;
 
-        // Текстуры скина удерживаем в полях + hideFlags — иначе IMGUI теряет фон.
+        // Текстуры скина — в полях + hideFlags (иначе IMGUI теряет фон).
         private Texture2D _texBg, _texBgAlt, _texBgHover, _texBgActive, _texAccent, _texDivider, _texTitlebar;
+        private Texture2D _lineTex;
 
         public static bool IsVisible => Instance != null && Instance._visible;
 
@@ -77,11 +73,9 @@ namespace SailwindTranslator
             if (!_visible) return;
             GUI.skin = _skin;
 
-            // Ограничиваем окно экраном.
             _window.x = Mathf.Clamp(_window.x, 0, Screen.width - 80);
             _window.y = Mathf.Clamp(_window.y, 0, Screen.height - 60);
 
-            // Рисуем окно: в нём сначала DragWindow по шапке, потом BeginArea с контентом.
             _window = GUI.Window(987654, _window, DrawWindow, "");
         }
 
@@ -104,20 +98,27 @@ namespace SailwindTranslator
 
         private void DrawWindow(int id)
         {
-            // Шапка: фон + drag + вкладки + статус.
-            Rect titlebar = new Rect(0, 0, _window.width, TitlebarH);
+            float W = _window.width;
+            float H = _window.height;
+            const float titlebarH = 34f;
+            const float footerH = 38f;
+            const float gripSize = 22f;
+            const float gripPad = 4f;
+
+            // === РЕГИОНЫ ===
+            Rect titlebar = new Rect(0, 0, W, titlebarH);
             GUI.DrawTexture(titlebar, _texTitlebar);
             DrawTabs(titlebar);
 
-            // Разделитель под шапкой.
-            Rect sep = new Rect(0, TitlebarH, _window.width, 1);
-            GUI.DrawTexture(sep, _texDivider);
+            GUI.DrawTexture(new Rect(0, titlebarH, W, 1), _texDivider);
 
-            // Контент: в области под шапкой.
-            // Высота с учётом подвала и resize-ручки.
-            float footerH = 28f;
-            Rect content = new Rect(0, TitlebarH + 1, _window.width, _window.height - TitlebarH - 1 - footerH);
-            GUILayout.BeginArea(content);
+            float contentY = titlebarH + 1;
+            float contentH = Mathf.Max(40f, H - titlebarH - 1 - footerH - 1);
+            Rect content = new Rect(0, contentY, W, contentH);
+
+            // Контент в GUI.BeginGroup — гарантированный клиппинг.
+            GUI.BeginGroup(content);
+            GUILayout.BeginArea(new Rect(0, 0, content.width, content.height));
             switch (_tab)
             {
                 case Tab.Translations: DrawTranslations(); break;
@@ -126,41 +127,45 @@ namespace SailwindTranslator
                 case Tab.Controls:      DrawControls(); break;
             }
             GUILayout.EndArea();
+            GUI.EndGroup();
 
-            // Подвал.
-            Rect footer = new Rect(0, _window.height - footerH, _window.width, footerH);
+            GUI.DrawTexture(new Rect(0, H - footerH - 1, W, 1), _texDivider);
+
+            // Футер — слева до W-gripSize-gripPad, не пересекает resize-ручку.
+            Rect footer = new Rect(0, H - footerH, W - gripSize - gripPad, footerH);
             GUILayout.BeginArea(footer);
+            GUILayout.FlexibleSpace();
             GUILayout.BeginHorizontal();
             GUILayout.Label(KeyLabel(Plugin.CfgEditorKey.Value) + " — закрыть", _skin.GetStyle("hint"));
             GUILayout.FlexibleSpace();
-            if (GUILayout.Button("Закрыть", GUILayout.Width(80))) Toggle();
+            if (GUILayout.Button("Закрыть", GUILayout.Width(100), GUILayout.Height(28))) Toggle();
             GUILayout.EndHorizontal();
             GUILayout.EndArea();
 
-            // Resize-ручка (правый нижний угол).
-            Rect handle = new Rect(_window.width - ResizeHandle, _window.height - ResizeHandle, ResizeHandle, ResizeHandle);
-            GUI.DrawTexture(handle, _texBgActive);
-            // Тонкие линии, намекающие на resize.
-            DrawResizeGrip(handle);
-            ResizeLogic(handle);
+            // Resize-ручка — отдельный регион в углу.
+            Rect grip = new Rect(W - gripSize - gripPad, H - gripSize - gripPad, gripSize, gripSize);
+            GUI.DrawTexture(grip, _texBgActive);
+            DrawResizeGrip(grip);
+            ResizeLogic(grip);
 
-            // Перетаскивание окна — по шапке (верхние TitlebarH пикселей).
-            GUI.DragWindow(new Rect(0, 0, _window.width, TitlebarH));
+            // Перетаскивание окна — по шапке.
+            GUI.DragWindow(new Rect(0, 0, W, titlebarH));
         }
 
         private void DrawTabs(Rect titlebar)
         {
-            // Вкладки рисуем через GUI.Box/Button в шапке.
-            float tabW = 130f;
+            // Адаптивная ширина вкладок — помещаются при любом размере окна.
+            float budget = (titlebar.width - 134f) / 4f; // 134 — под статус справа
+            float tabW = Mathf.Clamp(budget, 92f, 150f);
             float x = 6f;
-            float y = 3f;
-            DrawTabRect("Переводы", new Rect(x, y, tabW, TitlebarH - 6), Tab.Translations); x += tabW;
-            DrawTabRect("Настройки", new Rect(x, y, tabW, TitlebarH - 6), Tab.Settings);   x += tabW;
-            DrawTabRect("Шрифты",   new Rect(x, y, tabW, TitlebarH - 6), Tab.Fonts);        x += tabW;
-            DrawTabRect("Управление", new Rect(x, y, tabW, TitlebarH - 6), Tab.Controls);   x += tabW;
+            float y = 5f;
+            float h = titlebar.height - 10f;
+            DrawTabRect("Переводы",   new Rect(x, y, tabW, h), Tab.Translations); x += tabW + 2;
+            DrawTabRect("Настройки",  new Rect(x, y, tabW, h), Tab.Settings);     x += tabW + 2;
+            DrawTabRect("Шрифты",     new Rect(x, y, tabW, h), Tab.Fonts);        x += tabW + 2;
+            DrawTabRect("Управление", new Rect(x, y, tabW, h), Tab.Controls);
 
-            // Статус справа.
-            Rect status = new Rect(titlebar.width - 110, y, 104, TitlebarH - 6);
+            Rect status = new Rect(titlebar.width - 128f, y, 122f, h);
             GUI.Label(status, "RU ⇄ EN: " + (Plugin.CfgLanguage.Value == "ru" ? "RU" : "EN"),
                 _skin.GetStyle("status"));
         }
@@ -174,22 +179,21 @@ namespace SailwindTranslator
 
         private void DrawResizeGrip(Rect r)
         {
-            // Две диагональные линии в углу ручки.
             Color c = _skin.GetStyle("muted").normal.textColor;
-            Texture2D tex = MakeLineTex(c);
-            // линия 1
+            Texture2D tex = LineTex(c);
             GUI.DrawTexture(new Rect(r.x + 4, r.y + r.height - 6, r.width - 8, 1), tex);
-            // линия 2
-            GUI.DrawTexture(new Rect(r.x + 8, r.y + r.height - 10, r.width - 12, 1), tex);
+            GUI.DrawTexture(new Rect(r.x + 8, r.y + r.height - 11, r.width - 14, 1), tex);
+            GUI.DrawTexture(new Rect(r.x + 12, r.y + r.height - 16, r.width - 20, 1), tex);
         }
 
-        private Texture2D _lineTex;
-        private Texture2D MakeLineTex(Color c)
+        private Texture2D LineTex(Color c)
         {
             if (_lineTex == null)
             {
                 _lineTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
                 _lineTex.hideFlags = HideFlags.HideAndDontSave;
+                _lineTex.wrapMode = TextureWrapMode.Clamp;
+                _lineTex.filterMode = FilterMode.Point;
             }
             _lineTex.SetPixel(0, 0, c);
             _lineTex.Apply();
@@ -200,15 +204,8 @@ namespace SailwindTranslator
         {
             var e = Event.current;
             if (e == null) return;
-
-            if (e.type == EventType.MouseDown && handle.Contains(e.mousePosition))
-            {
-                _resizing = true;
-            }
-            if (e.type == EventType.MouseUp)
-            {
-                _resizing = false;
-            }
+            if (e.type == EventType.MouseDown && handle.Contains(e.mousePosition)) _resizing = true;
+            if (e.type == EventType.MouseUp) _resizing = false;
             if (_resizing && e.type == EventType.MouseDrag)
             {
                 _window.width = Mathf.Clamp(_window.width + e.delta.x, MinW, Screen.width - _window.x);
@@ -216,38 +213,40 @@ namespace SailwindTranslator
                 e.Use();
             }
         }
+        private bool _resizing;
+        private const float MinW = 560f;
+        private const float MinH = 400f;
 
         // ---------- Вкладки ----------
 
         private void DrawTranslations()
         {
-            // Ширины колонок — пропорционально ширине окна.
             float keyW = Mathf.Max(180f, _window.width * 0.36f);
 
             GUILayout.BeginHorizontal(_skin.box);
-            GUILayout.Label("Поиск:", GUILayout.Width(60));
-            _search = GUILayout.TextField(_search, GUILayout.ExpandWidth(true));
-            if (GUILayout.Button("Обновить", GUILayout.Width(90))) Refresh();
-            if (GUILayout.Button("Сохранить", GUILayout.Width(90))) Plugin.Manager?.Save();
-            if (GUILayout.Button("Перечитать", GUILayout.Width(90))) { Plugin.Manager?.Load(); Refresh(); }
+            GUILayout.Label("Поиск:", GUILayout.Width(60), GUILayout.Height(26));
+            _search = GUILayout.TextField(_search, GUILayout.ExpandWidth(true), GUILayout.Height(26));
+            if (GUILayout.Button("Обновить", GUILayout.Width(90), GUILayout.Height(26))) Refresh();
+            if (GUILayout.Button("Сохранить", GUILayout.Width(90), GUILayout.Height(26))) Plugin.Manager?.Save();
+            if (GUILayout.Button("Перечитать", GUILayout.Width(90), GUILayout.Height(26))) { Plugin.Manager?.Load(); Refresh(); }
             GUILayout.EndHorizontal();
 
             int count = Plugin.Manager?.Count ?? 0;
             GUILayout.Label("Всего: " + count + "   |   Показано: " + _rows.Count, _skin.GetStyle("muted"));
 
-            _scroll = GUILayout.BeginScrollView(_scroll, _skin.box, GUILayout.ExpandHeight(true));
+            _scrollTrans = GUILayout.BeginScrollView(_scrollTrans, _skin.box, GUILayout.ExpandHeight(true));
             for (int i = 0; i < _rows.Count; i++)
             {
                 var row = _rows[i];
                 GUILayout.BeginHorizontal(_skin.box);
-                GUILayout.Label(row.Key, _skin.GetStyle("key"), GUILayout.Width(keyW));
-                string nv = GUILayout.TextField(row.Value ?? "", GUILayout.ExpandWidth(true));
+                GUILayout.Label(row.Key, _skin.GetStyle("key"), GUILayout.Width(keyW), GUILayout.Height(26));
+                string nv = GUILayout.TextField(row.Value ?? "", GUILayout.ExpandWidth(true), GUILayout.Height(26));
                 if (nv != (row.Value ?? ""))
                 {
                     Plugin.Manager?.Set(row.Key, nv);
                     _rows[i] = new KeyValuePair<string, string>(row.Key, nv);
                 }
-                if (GUILayout.Button("×", GUILayout.Width(26)))
+                if (GUILayout.Button("×", GUILayout.Width(28), GUILayout.Height(26)))
                 {
                     Plugin.Manager?.Remove(row.Key);
                     _rows.RemoveAt(i); i--;
@@ -257,11 +256,11 @@ namespace SailwindTranslator
             GUILayout.EndScrollView();
 
             GUILayout.BeginHorizontal(_skin.box);
-            GUILayout.Label("EN:", GUILayout.Width(40));
-            _newKey = GUILayout.TextField(_newKey, GUILayout.Width(keyW));
-            GUILayout.Label("RU:", GUILayout.Width(40));
-            _newValue = GUILayout.TextField(_newValue, GUILayout.ExpandWidth(true));
-            if (GUILayout.Button("+", GUILayout.Width(30)))
+            GUILayout.Label("EN:", GUILayout.Width(40), GUILayout.Height(26));
+            _newKey = GUILayout.TextField(_newKey, GUILayout.Width(keyW), GUILayout.Height(26));
+            GUILayout.Label("RU:", GUILayout.Width(40), GUILayout.Height(26));
+            _newValue = GUILayout.TextField(_newValue, GUILayout.ExpandWidth(true), GUILayout.Height(26));
+            if (GUILayout.Button("+", GUILayout.Width(32), GUILayout.Height(26)))
             {
                 if (!string.IsNullOrWhiteSpace(_newKey))
                 {
@@ -275,16 +274,17 @@ namespace SailwindTranslator
 
         private void DrawSettings()
         {
-            GUILayout.BeginVertical(_skin.box, GUILayout.ExpandHeight(true));
+            _scrollSettings = GUILayout.BeginScrollView(_scrollSettings, _skin.box, GUILayout.ExpandHeight(true));
+            GUILayout.BeginVertical(_skin.box);
             Plugin.CfgEnableTranslation.Value = GUILayout.Toggle(Plugin.CfgEnableTranslation.Value, "  Перевод включён");
             Plugin.CfgLiveTranslate.Value     = GUILayout.Toggle(Plugin.CfgLiveTranslate.Value,     "  Онлайн-перевод незнакомых строк (нужен интернет)");
             Plugin.CfgDumpUntranslated.Value  = GUILayout.Toggle(Plugin.CfgDumpUntranslated.Value,  "  Записывать непереведённые строки в untranslated.csv");
 
-            GUILayout.Space(8);
+            GUILayout.Space(10);
             GUILayout.Label("Потоки перевода: " + Plugin.CfgLiveWorkers.Value, _skin.GetStyle("muted"));
             Plugin.CfgLiveWorkers.Value = (int)GUILayout.HorizontalSlider(Plugin.CfgLiveWorkers.Value, 1, 8);
 
-            GUILayout.Space(8);
+            GUILayout.Space(10);
             GUILayout.Label("Язык интерфейса игры:", _skin.GetStyle("muted"));
             GUILayout.BeginHorizontal();
             if (GUILayout.Toggle(Plugin.CfgLanguage.Value == "ru", "Русский") && Plugin.CfgLanguage.Value != "ru")
@@ -293,11 +293,11 @@ namespace SailwindTranslator
             { Plugin.CfgLanguage.Value = "en"; SceneTranslator.OnLanguageChanged(); }
             GUILayout.EndHorizontal();
 
-            GUILayout.Space(12);
+            GUILayout.Space(14);
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Сохранить конфиг", GUILayout.Width(160)))
+            if (GUILayout.Button("Сохранить конфиг", GUILayout.Width(170), GUILayout.Height(28)))
                 Plugin.Instance.Config.Save();
-            if (GUILayout.Button("Очистить кеш переводов", GUILayout.Width(200)))
+            if (GUILayout.Button("Очистить кеш переводов", GUILayout.Width(210), GUILayout.Height(28)))
             {
                 if (Plugin.Manager != null)
                 {
@@ -309,6 +309,7 @@ namespace SailwindTranslator
             }
             GUILayout.EndHorizontal();
             GUILayout.EndVertical();
+            GUILayout.EndScrollView();
         }
 
         private void DrawFonts()
@@ -321,23 +322,23 @@ namespace SailwindTranslator
             GUILayout.Label("Положи .ttf в BepInEx/plugins/SailwindTranslator/ и нажми «Пересканировать».", _skin.GetStyle("hint"));
 
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Пересканировать папку", GUILayout.Width(200))) _fonts.Scan();
+            if (GUILayout.Button("Пересканировать папку", GUILayout.Width(210), GUILayout.Height(26))) _fonts.Scan();
             GUILayout.FlexibleSpace();
             GUILayout.Label("Найдено: " + _fonts.Entries.Count, _skin.GetStyle("muted"));
             GUILayout.EndHorizontal();
 
             GUILayout.Space(4);
-            _fontScroll = GUILayout.BeginScrollView(_fontScroll, _skin.box, GUILayout.ExpandHeight(true));
+            _scrollFonts = GUILayout.BeginScrollView(_scrollFonts, _skin.box, GUILayout.ExpandHeight(true));
             string current = Plugin.CfgGameFont.Value;
             foreach (var fe in _fonts.Entries)
             {
                 bool selected = fe.Id == current;
                 GUIStyle row = _skin.GetStyle(selected ? "fontrow_active" : "fontrow");
                 GUILayout.BeginHorizontal(row);
-                GUILayout.Label(selected ? "●" : "○", _skin.GetStyle(selected ? "accent" : "muted"), GUILayout.Width(20));
-                GUILayout.Label(fe.DisplayName, GUILayout.ExpandWidth(true));
-                GUILayout.Label(fe.Source, _skin.GetStyle("muted"), GUILayout.Width(70));
-                if (!selected && GUILayout.Button("Выбрать", GUILayout.Width(90)))
+                GUILayout.Label(selected ? "●" : "○", _skin.GetStyle(selected ? "accent" : "muted"), GUILayout.Width(22), GUILayout.Height(28));
+                GUILayout.Label(fe.DisplayName, GUILayout.ExpandWidth(true), GUILayout.Height(28));
+                GUILayout.Label(fe.Source, _skin.GetStyle("muted"), GUILayout.Width(76), GUILayout.Height(28));
+                if (!selected && GUILayout.Button("Выбрать", GUILayout.Width(100), GUILayout.Height(26)))
                 {
                     if (_fonts.Apply(fe.Id)) SceneTranslator.OnLanguageChanged();
                 }
@@ -349,23 +350,27 @@ namespace SailwindTranslator
 
         private void DrawControls()
         {
-            GUILayout.BeginVertical(_skin.box, GUILayout.ExpandHeight(true));
+            _scrollControls = GUILayout.BeginScrollView(_scrollControls, _skin.box, GUILayout.ExpandHeight(true));
+            GUILayout.BeginVertical(_skin.box);
             GUILayout.Label("Переназначение клавиш. Нажми «Изменить», затем клавишу.", _skin.GetStyle("muted"));
+            GUILayout.Space(8);
             DrawKeyRow("Открыть/закрыть редактор", "editor", Plugin.CfgEditorKey.Value);
+            GUILayout.Space(4);
             DrawKeyRow("Переключить RU/EN",         "toggle", Plugin.CfgToggleKey.Value);
-            GUILayout.Space(12);
+            GUILayout.Space(16);
             if (_rebindingAction != null)
                 GUILayout.Label("Нажми любую клавишу… (Esc — отмена)", _skin.GetStyle("accent"));
             GUILayout.EndVertical();
+            GUILayout.EndScrollView();
         }
 
         private void DrawKeyRow(string label, string action, KeyCode current)
         {
             GUILayout.BeginHorizontal(_skin.box);
-            GUILayout.Label(label, GUILayout.ExpandWidth(true));
-            GUILayout.Label(KeyLabel(current), _skin.GetStyle("key"), GUILayout.Width(100));
+            GUILayout.Label(label, GUILayout.ExpandWidth(true), GUILayout.Height(30));
+            GUILayout.Label(KeyLabel(current), _skin.GetStyle("key"), GUILayout.Width(110), GUILayout.Height(30));
             bool rebinding = _rebindingAction == action;
-            if (GUILayout.Button(rebinding ? "Отмена" : "Изменить", GUILayout.Width(90)))
+            if (GUILayout.Button(rebinding ? "Отмена" : "Изменить", GUILayout.Width(100), GUILayout.Height(28)))
                 _rebindingAction = rebinding ? null : action;
             GUILayout.EndHorizontal();
         }
@@ -422,7 +427,6 @@ namespace SailwindTranslator
         private void BuildSkin()
         {
             _uiFont = Plugin.FontResolver?.GetFontForUi() ?? Font.CreateDynamicFontFromOSFont("Arial", 14);
-
             _skin = ScriptableObject.CreateInstance<GUISkin>();
             _skin.font = _uiFont;
             _skin.hideFlags = HideFlags.HideAndDontSave;
@@ -445,13 +449,11 @@ namespace SailwindTranslator
             _texDivider  = MakeTex(divider);
             _texTitlebar = MakeTex(titlebar);
 
-            // box
             var box = new GUIStyle(GUI.skin.box);
             box.normal.background = _texBgAlt; box.normal.textColor = text;
             box.onNormal.background = _texBgAlt;
             _skin.box = box;
 
-            // window
             var win = new GUIStyle(GUI.skin.window);
             win.normal.background = _texBg; win.normal.textColor = text;
             win.onNormal.background = _texBg; win.onNormal.textColor = text;
